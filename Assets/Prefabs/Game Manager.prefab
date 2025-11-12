@@ -1,0 +1,91 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &3595759965372316351
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 4688130077697307879}
+  - component: {fileID: 125831783339448925}
+  - component: {fileID: 2810053114686785439}
+  m_Layer: 0
+  m_Name: Game Manager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &4688130077697307879
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3595759965372316351}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -0.16349763, y: 0.6299905, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &125831783339448925
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3595759965372316351}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 67d78d04b9771c5478fb91d93251124c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  playerController: {fileID: 0}
+  dollyCam: {fileID: 0}
+  boardVisual: {fileID: 0}
+  comboTextSpawner: {fileID: 0}
+  scoreText: {fileID: 6946536651112335832, guid: 9ccf464b9eff83543bfcea35d3464ef2, type: 3}
+  comboText: {fileID: 6946536651112335832, guid: 9ccf464b9eff83543bfcea35d3464ef2, type: 3}
+  isPaused: 0
+  gameStarted: 0
+  groundLayer:
+    serializedVersion: 2
+    m_Bits: 64
+  grindLayer:
+    serializedVersion: 2
+    m_Bits: 128
+--- !u!114 &2810053114686785439
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3595759965372316351}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bc790a62b071e4c4dbe6c4ca95ead1dd, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  maxStamina: 100
+  currentStamina: 100
+  staminaRegenRate: 2
+  staminaDecayRate: 1
+  lowStaminaThreshold: 15
+  criticalStaminaThreshold: 30
+  pushRestore: 15
+  grindRegenRate: 5
+  perfectLandBonus: -15
+  basicTrickCost: 20
+  complexTrickCost: 40
+  grindStartCost: 10
+  jumpCost: 5
+  specialTrickCost: 50
+  boostCost: 25
+  staminaBarUI: {fileID: 0}
+  playerController: {fileID: 0}
+  mainCamera: {fileID: 0}
