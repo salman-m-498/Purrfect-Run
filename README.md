@@ -1,4 +1,4 @@
-SKATEBOARDING CAT GAME
+Purrfect Run
 ====================
 
 A physics-based skateboarding game where you control a cat performing tricks and combos.
