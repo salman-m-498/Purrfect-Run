@@ -1,132 +1,120 @@
 using UnityEngine;
-using UnityEngine.UI;
 
+/// <summary>
+/// Handles player stamina for tricks, jumps, grinding, and boosts.
+/// Integrates with UIManager for visual updates.
+/// </summary>
 public class StaminaSystem : MonoBehaviour
 {
-    [Header("Balanced Stamina Settings")]
+    [Header("Stamina Settings")]
     public float maxStamina = 100f;
     public float currentStamina = 100f;
-    public float staminaRegenRate = 3f;      // Base regen per second when grounded
-    public float staminaDecayRate = 0.2f;    // Passive decay
-    public float lowStaminaThreshold = 20f;  // Tricks disabled if below this
-    public float criticalStaminaThreshold = 30f; // Visual effects start
+    [Tooltip("Base stamina regeneration per second when grounded")]
+    public float staminaRegenRate = 3f;
+    [Tooltip("Passive stamina decay per second")]
+    public float staminaDecayRate = 0.2f;
+    [Tooltip("Stamina level below which tricks are disabled")]
+    public float lowStaminaThreshold = 20f;
+    [Tooltip("Stamina level below which visual effects start")]
+    public float criticalStaminaThreshold = 30f;
 
     [Header("Action Costs / Gains")]
-    public float pushRestore = 15f;          // Push restores stamina
-    public float grindRegenRate = 5f;        // Regen per second while grinding
-    public float perfectLandBonus = 10f;     // Bonus for perfect landings
-    public float basicTrickCost = 15f;       // Simple trick cost
-    public float complexTrickCost = 25f;     // Complex trick cost
-    public float grindStartCost = 5f;        // Starting grind cost
-    public float jumpCost = 4f;              // Ollie/jump cost
-    public float specialTrickCost = 40f;     // Special moves
-    public float boostCost = 20f;            // Optional boost mechanic
-
-    [Header("Visual Effects")]
-    private StaminaBarUI staminaBarUI;        // Reference to the UI component
+    public float pushRestore = 15f;
+    public float grindRegenRate = 5f;
+    public float perfectLandBonus = 10f;
+    public float basicTrickCost = 15f;
+    public float complexTrickCost = 25f;
+    public float grindStartCost = 5f;
+    public float jumpCost = 4f;
+    public float specialTrickCost = 40f;
+    public float boostCost = 20f;
 
     [Header("References")]
     public GameManager gameManager;
     private PlayerController playerController;
-    private Camera mainCamera;                // Optional: camera effects for low stamina
+    private DollyCam cam;
 
     private bool isGrinding = false;
     private bool isGrounded = true;
     private bool isPerformingTrick = false;
     private float lastPushTime = 0f;
-    private const float PUSH_COOLDOWN = 0.5f; // Prevent stamina farming
+    private const float PUSH_COOLDOWN = 0.5f;
 
     private void Awake()
     {
+        // Automatically find GameManager if not assigned
         if (gameManager == null)
             gameManager = FindObjectOfType<GameManager>();
     }
 
     private void Start()
     {
-        if (playerController == null)
-            playerController = gameManager.playerController;
+        // Grab references from GameManager
+        playerController ??= gameManager.playerController;
+        cam ??= gameManager.cam;
 
-        staminaBarUI ??= gameManager.staminaBarUI;
-        mainCamera ??= gameManager.mainCamera;
-
-        if (staminaBarUI == null)
+        // Ensure UIManager exists
+        if (UIManager.Instance == null)
         {
-            InitializeUI();
+            Debug.LogError("UIManager not found! Add a UIManager to the scene.");
         }
-    }
-
-    private void InitializeUI()
-    {
-        if (staminaBarUI == null)
-        {
-            Canvas targetCanvas = FindObjectOfType<Canvas>();
-            if (targetCanvas != null)
-            {
-                staminaBarUI = StaminaBarUI.CreateStaminaBar(targetCanvas.transform);
-            }
-            else
-            {
-                Debug.LogError("No Canvas found for Stamina Bar UI!");
-            }
-        }
-
-        currentStamina = maxStamina;
-        UpdateVisuals();
     }
 
     private void Update()
     {
-        // Passive decay
-        ModifyStamina(-staminaDecayRate * Time.deltaTime);
-
-        // Regeneration when grounded and not performing tricks
-        if (isGrounded && !isPerformingTrick)
-        {
-            float regen = isGrinding ? grindRegenRate : staminaRegenRate;
-            ModifyStamina(+regen * Time.deltaTime);
-        }
-
+        HandleStaminaDecay();
+        HandleStaminaRegen();
         UpdateVisuals();
         UpdateEffects();
     }
 
+    // ===================== STAMINA MODIFIERS =====================
+
     /// <summary>
-    /// Modify stamina by a certain amount. Positive consumes, negative restores.
+    /// Modify stamina by a certain amount.
+    /// Positive values consume stamina, negative values restore stamina.
     /// </summary>
     public void ModifyStamina(float amount)
     {
-        float previousStamina = currentStamina;
-        currentStamina = Mathf.Clamp(currentStamina - amount, 0f, maxStamina); // Subtract positive cost, add negative regen
+        float previous = currentStamina;
 
-        // Trick availability state
-        if (previousStamina >= lowStaminaThreshold && currentStamina < lowStaminaThreshold)
-        {
+        // Subtract positive cost, add negative (restoration)
+        currentStamina = Mathf.Clamp(currentStamina - amount, 0f, maxStamina);
+
+        // Handle trick availability when crossing thresholds
+        if (previous >= lowStaminaThreshold && currentStamina < lowStaminaThreshold)
             DisableTricks();
-        }
-        else if (previousStamina < lowStaminaThreshold && currentStamina >= lowStaminaThreshold)
-        {
+        else if (previous < lowStaminaThreshold && currentStamina >= lowStaminaThreshold)
             EnableTricks();
+    }
+
+    public bool HasEnoughStamina(float cost) => currentStamina >= cost;
+
+    private void HandleStaminaDecay()
+    {
+        // Passive stamina decay over time
+        ModifyStamina(staminaDecayRate * Time.deltaTime);
+    }
+
+    private void HandleStaminaRegen()
+    {
+        if (isGrounded && !isPerformingTrick)
+        {
+            float regenAmount = isGrinding ? grindRegenRate : staminaRegenRate;
+            ModifyStamina(-regenAmount * Time.deltaTime); // Negative = restore
         }
     }
 
-    public bool HasEnoughStamina(float cost)
-    {
-        return currentStamina >= cost;
-    }
-
-    // ===================== Player Actions =====================
+    // ===================== PLAYER ACTIONS =====================
 
     public void OnPush()
     {
         if (Time.time - lastPushTime < PUSH_COOLDOWN) return;
 
-        // Diminishing returns at high stamina
+        // Reduce restoration if stamina is already high
         float actualRestore = pushRestore;
         if (currentStamina > 80f)
-        {
             actualRestore *= 1f - ((currentStamina - 80f) / 20f);
-        }
 
         ModifyStamina(-actualRestore); // Negative = restore
         lastPushTime = Time.time;
@@ -137,15 +125,12 @@ public class StaminaSystem : MonoBehaviour
         float cost = isComplex ? complexTrickCost : basicTrickCost;
         if (HasEnoughStamina(cost))
         {
-            ModifyStamina(cost); // Positive cost = consume
+            ModifyStamina(cost); // Positive = consume
             isPerformingTrick = true;
         }
     }
 
-    public void OnTrickEnd()
-    {
-        isPerformingTrick = false;
-    }
+    public void OnTrickEnd() => isPerformingTrick = false;
 
     public void OnGrindStart()
     {
@@ -156,10 +141,7 @@ public class StaminaSystem : MonoBehaviour
         }
     }
 
-    public void OnGrindEnd()
-    {
-        isGrinding = false;
-    }
+    public void OnGrindEnd() => isGrinding = false;
 
     public void OnJump()
     {
@@ -167,10 +149,7 @@ public class StaminaSystem : MonoBehaviour
             ModifyStamina(jumpCost);
     }
 
-    public void OnPerfectLand()
-    {
-        ModifyStamina(-perfectLandBonus); // Negative = restore
-    }
+    public void OnPerfectLand() => ModifyStamina(-perfectLandBonus);
 
     public void OnSpecialTrick()
     {
@@ -184,30 +163,22 @@ public class StaminaSystem : MonoBehaviour
             ModifyStamina(boostCost);
     }
 
-    public void SetGrounded(bool grounded)
-    {
-        isGrounded = grounded;
-    }
+    public void SetGrounded(bool grounded) => isGrounded = grounded;
 
-    // ===================== Visual & Feedback =====================
+    // ===================== VISUALS & FEEDBACK =====================
 
     private void UpdateVisuals()
     {
-        if (staminaBarUI != null)
-        {
-            staminaBarUI.UpdateStamina(currentStamina, maxStamina);
-        }
+        // Update the stamina bar through UIManager
+        if (UIManager.Instance != null)
+            UIManager.Instance.UpdateStamina(currentStamina, maxStamina);
     }
 
     private void UpdateEffects()
     {
-        if (mainCamera != null)
+        if (cam != null && currentStamina < criticalStaminaThreshold)
         {
-            // Optional: add subtle effects for low stamina
-            if (currentStamina < criticalStaminaThreshold)
-            {
-                // e.g., camera shake, desaturation, vignette
-            }
+            // Optional: low stamina effects (camera shake, vignette, desaturation)
         }
     }
 
@@ -222,4 +193,6 @@ public class StaminaSystem : MonoBehaviour
         if (playerController != null)
             playerController.canOllie = true;
     }
+
+    public void ResetStamina() { }
 }

@@ -32,7 +32,6 @@ public class PlayerController : MonoBehaviour
     private Vector2 initialSwipePos;
 
     private DollyCam cam;
-    private ComboTextSpawner comboTextSpawner;
     private GameManager gameManager;
     private StaminaSystem staminaSystem;
 
@@ -60,6 +59,10 @@ public class PlayerController : MonoBehaviour
     private float lastTrickTime;
     private string lastTrickName = "";
     public int totalScore = 0;
+
+    public float CurrentAirTime => 0f;
+    public float CurrentSpeed => 0f;
+    public bool LastLandingPerfect => false;
     
     // Base scores for tricks
     private readonly Dictionary<string, int> trickScores = new Dictionary<string, int>()
@@ -91,9 +94,8 @@ public class PlayerController : MonoBehaviour
     public void Initialize(GameManager manager)
     {
         gameManager = manager;
-        cam = manager.dollyCam;
-        comboTextSpawner = manager.comboTextSpawner;
-        boardVisual = manager.boardVisual;
+        cam = manager.cam;
+        //boardVisual = manager.boardVisual; // Assuming boardVisual is set on GameManager, otherwise this needs assignment
         staminaSystem = FindObjectOfType<StaminaSystem>();
         
         if (staminaSystem == null)
@@ -521,9 +523,9 @@ public class PlayerController : MonoBehaviour
                     totalScore += Mathf.RoundToInt(timePoints);
 
                     // Update the UI so the player sees the score go up
-                    if (gameManager != null)
+                    if (UIManager.Instance != null)
                     {
-                        gameManager.UpdateUI(totalScore, currentCombo, comboMultiplier);
+                        UIManager.Instance.UpdateScore(totalScore);
                     }
                 }
             }
@@ -952,10 +954,10 @@ public class PlayerController : MonoBehaviour
             comboMultiplier = 1f;
         }
 
-        // Update UI through GameManager
-        if (gameManager != null)
+        // Update UI through UIManager
+        if (UIManager.Instance != null)
         {
-            gameManager.UpdateUI(totalScore, currentCombo, comboMultiplier);
+            UIManager.Instance.UpdateScore(totalScore);
         }
 
         // Calculate score with error handling
@@ -966,10 +968,10 @@ public class PlayerController : MonoBehaviour
             Debug.Log($"{trickName} x{multiplier} (Combo x{comboMultiplier:F1}) = +{scoreAdd} points! Total: {totalScore}");
             
             // Spawn combo text slightly above the player
-            if (comboTextSpawner != null)
+            if (UIManager.Instance != null)
             {
                 Vector3 textPosition = transform.position + Vector3.up * 1.5f;
-                comboTextSpawner.SpawnTrickText(trickName, textPosition, multiplier, comboMultiplier);
+                UIManager.Instance.SpawnTrickText(trickName, textPosition, multiplier, comboMultiplier);
             }
         }
         else
@@ -981,10 +983,10 @@ public class PlayerController : MonoBehaviour
             totalScore += scoreAdd;
             
             // Spawn combo text even for undefined tricks
-            if (comboTextSpawner != null)
+            if (UIManager.Instance != null)
             {
                 Vector3 textPosition = transform.position + Vector3.up * 1.5f;
-                comboTextSpawner.SpawnTrickText(trickName, textPosition, multiplier, comboMultiplier);
+                UIManager.Instance.SpawnTrickText(trickName, textPosition, multiplier, comboMultiplier);
             }
             
             Debug.Log($"{trickName} x{multiplier} (Default Score) = +{scoreAdd} points! Total: {totalScore}");
@@ -1021,15 +1023,17 @@ public class PlayerController : MonoBehaviour
 
         string multipleTrickName = flips > 1 ? $"{flips}x {trickName}" : trickName;
         Debug.Log($"{multipleTrickName}!");
-        
+
         if (cam != null)
         {
             cam.SetIgnoreRotation(true);
             cam.TriggerCameraShake();
         }
         StartCoroutine(VisualFlipRoutine(axis, multipleTrickName, isXAxisRotation, flips));
-        
+
         // Add to combo with multiplier based on number of flips
         AddToCombo(trickName, flips);
     }
+    
+    public void ResetForNewLevel() { }
 }

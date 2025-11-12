@@ -1,29 +1,74 @@
 using UnityEngine;
-using TMPro;
+using UnityEngine.SceneManagement;
+using System.Collections.Generic;
 
+public enum GameState
+{
+    MainMenu,
+    Playing,
+    Paused,
+    LevelComplete,
+    LevelFailed,
+    Store,
+    SkillCheck,
+    GameOver
+}
+
+public enum LevelType
+{
+    Normal,
+    SkillCheck
+}
+
+/// <summary>
+/// GameManager: The brain of the game - controls rounds, levels, win/loss states, and global data.
+/// Delegates specific responsibilities to specialized systems.
+/// </summary>
 public class GameManager : MonoBehaviour
 {
     public static GameManager Instance { get; private set; }
 
-    [Header("Player References")]
+    [Header("Core System References")]
     public PlayerController playerController;
-    public DollyCam dollyCam;
-    public Transform boardVisual;
+    public LevelManager levelManager;
+    public ScoreSystem scoreSystem;
+    public StaminaSystem staminaSystem;
+    public StoreManager storeManager;
+    public UIManager uiManager;
+    public SkillCheckSystem skillCheckSystem;
+    public ItemSystem itemSystem;
+    public DollyCam cam;
 
-    [Header("UI References")]
-    public ComboTextSpawner comboTextSpawner;
-    public StaminaBarUI staminaBarUI;
-    public TMP_Text scoreText;
-    public TMP_Text comboText;
+    [Header("Game State")]
+    public GameState currentState = GameState.MainMenu;
+    private GameState stateBeforePause;
 
-    [Header("Game Settings")]
-    public bool isPaused = false;
-    public bool gameStarted = false;
+    [Header("Run Progression")]
+    public int currentRound = 1;          // Current round (each round = 3 levels)
+    public int currentLevelInRound = 1;   // 1, 2, or 3 (3rd is always skill check)
+    public int totalLevelsCompleted = 0;  // Total across all rounds
+    public int maxRoundsPerRun = 10;      // How many rounds before victory
+    
+    [Header("Global Player Data")]
+    public PlayerData playerData;         // Persistent run data
+    
+    [Header("Run Statistics")]
+    public float runStartTime;
+    public float totalRunTime;
+    public int highestRoundReached = 0;
+    public int totalCoinsEarnedThisRun = 0;
 
-    [Header("Scene References")]
-    public Camera mainCamera;
-    public LayerMask groundLayer;
-    public LayerMask grindLayer;
+    [Header("Level Configuration")]
+    public int baseScoreRequirement = 5000;
+    public float scoreMultiplierPerLevel = 1.2f;
+    public float baseLevelDuration = 60f;
+
+    // Events
+    public System.Action<GameState> OnGameStateChanged;
+    public System.Action<int, int> OnRoundChanged;     // (round, level)
+    public System.Action<bool> OnLevelEnded;           // (success)
+    public System.Action OnRunEnded;
+    public System.Action<int> OnCoinsChanged;
 
     void Awake()
     {
@@ -39,79 +84,573 @@ public class GameManager : MonoBehaviour
             return;
         }
 
-        InitializeGame();
+        InitializeSystems();
     }
 
-    void InitializeGame()
+    void InitializeSystems()
     {
-
-        if(mainCamera == null)
-            mainCamera = Camera.main;
-        // Find references if not set
+        // Initialize PlayerData
+        if (playerData == null)
+            playerData = new PlayerData();
+        
+        // Find system references if not assigned
         if (playerController == null)
             playerController = FindObjectOfType<PlayerController>();
-            
-        if (dollyCam == null)
-            dollyCam = FindObjectOfType<DollyCam>();
-            
-        if (comboTextSpawner == null)
-            comboTextSpawner = FindObjectOfType<ComboTextSpawner>();
+        if (levelManager == null)
+            levelManager = FindObjectOfType<LevelManager>();
+        if (scoreSystem == null)
+            scoreSystem = FindObjectOfType<ScoreSystem>();
+        if (staminaSystem == null)
+            staminaSystem = FindObjectOfType<StaminaSystem>();
+        if (storeManager == null)
+            storeManager = FindObjectOfType<StoreManager>();
+        if (uiManager == null)
+            uiManager = FindObjectOfType<UIManager>();
+        if (skillCheckSystem == null)
+            skillCheckSystem = FindObjectOfType<SkillCheckSystem>();
+        if (itemSystem == null)
+            itemSystem = FindObjectOfType<ItemSystem>();
+        if (cam == null)
+            cam = FindObjectOfType<DollyCam>();
 
-        // Initialize player references
+        // Initialize subsystems
         if (playerController != null)
-        {
             playerController.Initialize(this);
+        
+        // Load persistent data
+        playerData.LoadFromPlayerPrefs();
+        
+        Debug.Log("GameManager: All systems initialized");
+    }
+
+    void Start()
+    {
+        ChangeGameState(GameState.MainMenu);
+    }
+
+    void Update()
+    {
+        // Handle pause input
+        if (Input.GetKeyDown(KeyCode.Escape))
+        {
+            if (currentState == GameState.Playing)
+                PauseGame();
+            else if (currentState == GameState.Paused)
+                ResumeGame();
+        }
+
+        // Update run time
+        if (currentState == GameState.Playing)
+        {
+            totalRunTime = Time.time - runStartTime;
+        }
+    }
+
+    // ==================== GAME STATE MANAGEMENT ====================
+
+    public void ChangeGameState(GameState newState)
+    {
+        GameState previousState = currentState;
+        currentState = newState;
+
+        // Exit previous state
+        OnExitState(previousState);
+
+        // Enter new state
+        OnEnterState(newState);
+
+        OnGameStateChanged?.Invoke(newState);
+        Debug.Log($"GameManager: State changed {previousState} → {newState}");
+    }
+
+    private void OnExitState(GameState state)
+    {
+        switch (state)
+        {
+            case GameState.Playing:
+                Time.timeScale = 1f;
+                break;
+        }
+    }
+
+    private void OnEnterState(GameState state)
+    {
+        switch (state)
+        {
+            case GameState.MainMenu:
+                ShowMainMenu();
+                break;
+            case GameState.Playing:
+                StartLevel();
+                break;
+            case GameState.Paused:
+                PauseLevel();
+                break;
+            case GameState.LevelComplete:
+                HandleLevelComplete();
+                break;
+            case GameState.LevelFailed:
+                HandleLevelFailed();
+                break;
+            case GameState.Store:
+                OpenStore();
+                break;
+            case GameState.SkillCheck:
+                StartSkillCheck();
+                break;
+            case GameState.GameOver:
+                HandleGameOver();
+                break;
+        }
+    }
+
+    // ==================== MAIN MENU ====================
+
+    private void ShowMainMenu()
+    {
+        Time.timeScale = 1f;
+        if (uiManager != null)
+            uiManager.ShowMainMenu();
+    }
+
+    public void OnPlayButtonPressed()
+    {
+        StartNewRun();
+    }
+
+    public void OnQuitButtonPressed()
+    {
+        Application.Quit();
+    }
+
+    // ==================== RUN MANAGEMENT ====================
+
+    public void StartNewRun()
+    {
+        // Reset run data
+        currentRound = 1;
+        currentLevelInRound = 1;
+        totalLevelsCompleted = 0;
+        totalCoinsEarnedThisRun = 0;
+        runStartTime = Time.time;
+        totalRunTime = 0f;
+
+        // Reset player run data (not persistent data)
+        playerData.ResetRunData();
+
+        // Reset systems
+        if (scoreSystem != null)
+            scoreSystem.ResetScore();
+        if (staminaSystem != null)
+            staminaSystem.ResetStamina();
+        if (itemSystem != null)
+            itemSystem.ClearActiveItems();
+
+        Debug.Log("GameManager: Starting new run");
+        
+        // Start first level
+        ChangeGameState(GameState.Playing);
+    }
+
+    // ==================== LEVEL FLOW ====================
+
+    private void StartLevel()
+    {
+        Time.timeScale = 1f;
+
+        // Determine level type
+        LevelType levelType = (currentLevelInRound == 3) ? LevelType.SkillCheck : LevelType.Normal;
+
+        // Calculate requirements for this level
+        int requiredScore = CalculateScoreRequirement();
+        float timeLimit = baseLevelDuration;
+
+        // Tell LevelManager to setup the level
+        if (levelManager != null)
+        {
+            levelManager.SetupLevel(levelType, requiredScore, timeLimit);
+            levelManager.StartLevel();
+        }
+
+        // Reset player for new level
+        if (playerController != null)
+            playerController.ResetForNewLevel();
+
+        // Reset score for this level
+        if (scoreSystem != null)
+            scoreSystem.ResetScore();
+
+        // Update UI
+        if (uiManager != null)
+        {
+            uiManager.ShowGameplayUI();
+            uiManager.UpdateRoundDisplay(currentRound, currentLevelInRound);
+        }
+
+        Debug.Log($"GameManager: Started Level - Round {currentRound}, Level {currentLevelInRound}/{3} ({levelType})");
+    }
+
+    private void StartSkillCheck()
+    {
+        if (skillCheckSystem != null)
+        {
+            skillCheckSystem.StartRandomChallenge();
+        }
+        
+        // Skill checks still use normal level flow but with special win conditions
+        ChangeGameState(GameState.Playing);
+    }
+
+    public void OnLevelTimerExpired()
+    {
+        // Level time ran out - check if player passed
+        CheckLevelCompletion();
+    }
+
+    public void OnPlayerReachedFinish()
+    {
+        // Player reached finish line early
+        CheckLevelCompletion();
+    }
+
+    private void CheckLevelCompletion()
+    {
+        bool passed = false;
+
+        // Check completion based on level type
+        if (currentLevelInRound == 3)
+        {
+            // Skill Check level
+            passed = skillCheckSystem != null && skillCheckSystem.IsChallengePassed();
         }
         else
         {
-            Debug.LogError("PlayerController not found in scene!");
+            // Normal level - check score requirement
+            int currentScore = scoreSystem != null ? scoreSystem.GetCurrentScore() : 0;
+            int required = CalculateScoreRequirement();
+            passed = currentScore >= required;
         }
 
-        UpdateUI(0, 0, 1f);
+        if (passed)
+        {
+            ChangeGameState(GameState.LevelComplete);
+        }
+        else
+        {
+            ChangeGameState(GameState.LevelFailed);
+        }
     }
 
-    public void UpdateUI(int score, int comboCount, float multiplier)
+    public void OnLevelCompleted(bool success, int score, float time)
+{
+    Debug.Log($"Level Completed: Success={success}, Score={score}, Time={time}");
+}
+
+
+    private void HandleLevelComplete()
     {
-        if (scoreText != null)
-            scoreText.text = $"Score: {score}";
-            
-        if (comboText != null && comboCount > 1)
-            comboText.text = $"Combo x{multiplier:F1} ({comboCount})";
-        else if (comboText != null)
-            comboText.text = "";
+        totalLevelsCompleted++;
+        
+        // Award coins based on performance
+        int coinsEarned = CalculateCoinsEarned();
+        AddCoins(coinsEarned);
+
+        // Update persistent stats
+        if (currentRound > highestRoundReached)
+            highestRoundReached = currentRound;
+
+        // Save high scores
+        int currentScore = scoreSystem != null ? scoreSystem.GetCurrentScore() : 0;
+        if (currentScore > playerData.highScore)
+        {
+            playerData.highScore = currentScore;
+            playerData.SaveToPlayerPrefs();
+        }
+
+        OnLevelEnded?.Invoke(true);
+
+        // Show results
+        if (uiManager != null)
+        {
+            LevelResultData results = new LevelResultData
+            {
+                passed = true,
+                score = currentScore,
+                coinsEarned = coinsEarned,
+                levelTime = levelManager != null ? levelManager.GetLevelTime() : 0f
+            };
+            uiManager.ShowLevelResults(results);
+        }
+
+        Debug.Log($"GameManager: Level Complete! Coins earned: {coinsEarned}");
     }
+
+    private void HandleLevelFailed()
+    {
+        OnLevelEnded?.Invoke(false);
+
+        // Show results
+        if (uiManager != null)
+        {
+            int currentScore = scoreSystem != null ? scoreSystem.GetCurrentScore() : 0;
+            LevelResultData results = new LevelResultData
+            {
+                passed = false,
+                score = currentScore,
+                requiredScore = CalculateScoreRequirement(),
+                coinsEarned = 0,
+                levelTime = levelManager != null ? levelManager.GetLevelTime() : 0f
+            };
+            uiManager.ShowLevelResults(results);
+        }
+
+        Debug.Log("GameManager: Level Failed");
+    }
+
+    // ==================== PROGRESSION FLOW ====================
+
+    public void OnContinueAfterLevelComplete()
+    {
+        // Move to next level
+        currentLevelInRound++;
+
+        // Check if round is complete (3 levels done)
+        if (currentLevelInRound > 3)
+        {
+            // Round complete - go to store
+            currentRound++;
+            currentLevelInRound = 1;
+            OnRoundChanged?.Invoke(currentRound, currentLevelInRound);
+
+            // Check if game is won
+            if (currentRound > maxRoundsPerRun)
+            {
+                // Player beat the game!
+                ChangeGameState(GameState.GameOver);
+            }
+            else
+            {
+                // Go to store between rounds
+                ChangeGameState(GameState.Store);
+            }
+        }
+        else
+        {
+            // Continue to next level in same round
+            OnRoundChanged?.Invoke(currentRound, currentLevelInRound);
+            ChangeGameState(GameState.Playing);
+        }
+    }
+
+    public void OnRetryAfterLevelFailed()
+    {
+        // Retry current level
+        ChangeGameState(GameState.Playing);
+    }
+
+    public void OnQuitToMenuAfterLevelFailed()
+    {
+        // End run and return to menu
+        EndRun(false);
+        ChangeGameState(GameState.MainMenu);
+    }
+
+    
+
+    // ==================== STORE FLOW ====================
+
+    private void OpenStore()
+    {
+        if (storeManager != null)
+        {
+            storeManager.OpenStore(playerData.coins);
+        }
+
+        if (uiManager != null)
+        {
+            uiManager.ShowStoreUI();
+        }
+
+        Debug.Log("GameManager: Store opened");
+    }
+
+    public void OnItemPurchased(string itemId, int cost)
+    {
+        // Deduct coins
+        AddCoins(-cost);
+
+        // Apply item
+        if (itemSystem != null)
+        {
+            itemSystem.ApplyItem(itemId);
+        }
+
+        // Add to owned items for this run
+        playerData.AddItemToRun(itemId);
+
+        Debug.Log($"GameManager: Purchased {itemId} for {cost} coins");
+    }
+
+    public void OnStoreExit()
+    {
+        // Return to next level
+        ChangeGameState(GameState.Playing);
+    }
+
+    // ==================== PAUSE/RESUME ====================
 
     public void PauseGame()
     {
-        isPaused = true;
-        Time.timeScale = 0f;
+        if (currentState == GameState.Playing)
+        {
+            stateBeforePause = currentState;
+            ChangeGameState(GameState.Paused);
+        }
     }
 
     public void ResumeGame()
     {
-        isPaused = false;
-        Time.timeScale = 1f;
+        if (currentState == GameState.Paused)
+        {
+            ChangeGameState(stateBeforePause);
+        }
     }
 
-    public void RestartGame()
+    private void PauseLevel()
     {
-        // Reset player state
-        if (playerController != null)
+        Time.timeScale = 0f;
+        if (uiManager != null)
+            uiManager.ShowPauseMenu();
+    }
+
+    public void OnResumeButtonPressed()
+    {
+        ResumeGame();
+    }
+
+    public void OnRestartLevelFromPause()
+    {
+        ResumeGame();
+        ChangeGameState(GameState.Playing);
+    }
+
+    public void OnQuitToMenuFromPause()
+    {
+        ResumeGame();
+        EndRun(false);
+        ChangeGameState(GameState.MainMenu);
+    }
+
+    // ==================== GAME OVER ====================
+
+    private void HandleGameOver()
+    {
+        bool victory = currentRound > maxRoundsPerRun;
+        EndRun(victory);
+
+        if (uiManager != null)
         {
-            playerController.ResetState();
+            GameOverData data = new GameOverData
+            {
+                victory = victory,
+                roundsCompleted = currentRound - 1,
+                totalScore = scoreSystem != null ? scoreSystem.GetTotalRunScore() : 0,
+                coinsEarned = totalCoinsEarnedThisRun,
+                runTime = totalRunTime
+            };
+            uiManager.ShowGameOver(data);
         }
 
-        UpdateUI(0, 0, 1f);
-        gameStarted = true;
+        OnRunEnded?.Invoke();
+        Debug.Log($"GameManager: Game Over - Victory: {victory}");
     }
 
-    void OnEnable()
+    private void EndRun(bool victory)
     {
-        // Subscribe to events
+        // Update persistent stats
+        playerData.totalRuns++;
+        if (victory)
+            playerData.totalVictories++;
+        
+        playerData.totalPlayTime += totalRunTime;
+        playerData.SaveToPlayerPrefs();
+
+        Debug.Log("GameManager: Run ended");
     }
 
-    void OnDisable()
+    // ==================== COIN MANAGEMENT ====================
+
+    public void AddCoins(int amount)
     {
-        // Unsubscribe from events
+        playerData.coins += amount;
+        totalCoinsEarnedThisRun += Mathf.Max(0, amount); // Only count positive additions
+        OnCoinsChanged?.Invoke(playerData.coins);
+
+        if (uiManager != null)
+            uiManager.UpdateCoinDisplay(playerData.coins);
     }
+
+    private int CalculateCoinsEarned()
+    {
+        int score = scoreSystem != null ? scoreSystem.GetCurrentScore() : 0;
+        
+        // Base coins from score
+        int baseCoins = score / 100;
+        
+        // Bonus from performance metrics
+        int bonusCoins = 0;
+        if (scoreSystem != null)
+        {
+            bonusCoins += scoreSystem.GetTotalCombos() * 10;
+            bonusCoins += scoreSystem.GetPerfectLandings() * 5;
+        }
+
+        return baseCoins + bonusCoins;
+    }
+
+    // ==================== DIFFICULTY SCALING ====================
+
+    private int CalculateScoreRequirement()
+    {
+        // Score requirement increases each level
+        int totalLevels = (currentRound - 1) * 3 + currentLevelInRound;
+        return Mathf.RoundToInt(baseScoreRequirement * Mathf.Pow(scoreMultiplierPerLevel, totalLevels - 1));
+    }
+
+    // ==================== PUBLIC GETTERS ====================
+
+    public int GetCurrentRound() => currentRound;
+    public int GetCurrentLevelInRound() => currentLevelInRound;
+    public int GetTotalCoins() => playerData.coins;
+    public PlayerData GetPlayerData() => playerData;
+    public bool IsSkillCheckLevel() => currentLevelInRound == 3;
+
+    // ==================== CLEANUP ====================
+
+    void OnApplicationQuit()
+    {
+        playerData.SaveToPlayerPrefs();
+    }
+}
+
+// ==================== DATA STRUCTURES ====================
+
+[System.Serializable]
+public class LevelResultData
+{
+    public bool passed;
+    public int score;
+    public int requiredScore;
+    public int coinsEarned;
+    public float levelTime;
+}
+
+[System.Serializable]
+public class GameOverData
+{
+    public bool victory;
+    public int roundsCompleted;
+    public int totalScore;
+    public int coinsEarned;
+    public float runTime;
 }
