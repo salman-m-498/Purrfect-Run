@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.SocialPlatforms.Impl;
 
 public class PlayerController : MonoBehaviour
 {
@@ -13,20 +14,20 @@ public class PlayerController : MonoBehaviour
     public float jumpForce = 3f;
 
     [Header("Trick Settings")]
-    public float swipeThreshold = 50f; // min swipe distance (for touch/mouse)
-    public float trickForce = 5f;      // how much lift force a trick adds
-    public float rotationSpeed = 360f; // spin speed during flip tricks
+    public float swipeThreshold = 50f;
+    public float trickForce = 5f;
+    public float rotationSpeed = 360f;
 
     [Header("Manual Settings")]
     public bool isManual = false;
-    public float manualTiltSpeed = 80f;       // degrees per second for balancing input
-    public float manualStartAngle = 10f;      // initial nose-up when manual starts (positive = nose-up)
-    public float maxManualAngle = 25f;        // absolute limit before immediate fail
-    public float manualSafeRange = 15f;       // safe balance range before fail timer starts
-    public float manualReturnSpeed = 5f;      // how fast it returns to base when not manual
-    public float manualFailTime = 0.5f;       // how long outside safe range before fail
+    public float manualTiltSpeed = 80f;
+    public float manualStartAngle = 10f;
+    public float maxManualAngle = 25f;
+    public float manualSafeRange = 15f;
+    public float manualReturnSpeed = 5f;
+    public float manualFailTime = 0.5f;
 
-    private float manualTargetAngle = 0f;     // desired pitch (degrees)
+    private float manualTargetAngle = 0f;
     private float manualFailTimer = 0f;
     private bool isHoldingManual = false;
     private Vector2 initialSwipePos;
@@ -34,19 +35,16 @@ public class PlayerController : MonoBehaviour
     private DollyCam cam;
     private GameManager gameManager;
     private StaminaSystem staminaSystem;
+    private ScoreSystem scoreSystem;
 
     [Header("References")]
-    // Visual child transform that represents the board model. This will be rotated for tricks
-    // while the parent (this GameObject) handles physics and movement.
     public Transform boardVisual;
-
-    // store the base (rest) local rotation so we always apply pitch relative to it
     private Quaternion baseLocalRot;
-    // base local rotation for the visual child (if used)
     private Quaternion boardVisualBaseLocalRot;
 
     [Header("State")]
     public bool isGrounded;
+    private float lastGroundedTime = 0f;
     public bool canMove = true;
     public bool canPush = true;
     public bool canOllie = true;
@@ -55,16 +53,14 @@ public class PlayerController : MonoBehaviour
     [Header("Combo System")]
     public int currentCombo = 0;
     public float comboMultiplier = 1f;
-    public float comboTimeWindow = 1.5f;  // time window to chain tricks
+    public float comboTimeWindow = 1.5f;
     private float lastTrickTime;
     private string lastTrickName = "";
-    public int totalScore = 0;
 
     public float CurrentAirTime => 0f;
     public float CurrentSpeed => 0f;
     public bool LastLandingPerfect => false;
     
-    // Base scores for tricks
     private readonly Dictionary<string, int> trickScores = new Dictionary<string, int>()
     {
         {"Ollie", 100},
@@ -74,7 +70,7 @@ public class PlayerController : MonoBehaviour
         {"Tre Flip", 500},
         {"Backflip", 400},
         {"Frontflip", 400},
-        {"Manual", 50}  // per second
+        {"Manual", 50}
     };
 
     public LayerMask groundLayer;
@@ -95,19 +91,23 @@ public class PlayerController : MonoBehaviour
     {
         gameManager = manager;
         cam = manager.cam;
-        //boardVisual = manager.boardVisual; // Assuming boardVisual is set on GameManager, otherwise this needs assignment
-        staminaSystem = FindObjectOfType<StaminaSystem>();
+        staminaSystem = manager.staminaSystem;
+        scoreSystem = manager.scoreSystem;
         
         if (staminaSystem == null)
         {
-            Debug.LogError("StaminaSystem not found in scene!");
+            Debug.LogError("StaminaSystem not found in GameManager!");
+        }
+        
+        if (scoreSystem == null)
+        {
+            Debug.LogError("ScoreSystem not found in GameManager!");
         }
 
         rb = GetComponent<Rigidbody>();
         targetSpeed = moveSpeed;
         baseLocalRot = transform.localRotation;
         
-        // Initialize base rotations
         if (boardVisual != null)
         {
             boardVisualBaseLocalRot = boardVisual.localRotation;
@@ -128,7 +128,6 @@ public class PlayerController : MonoBehaviour
         targetSpeed = 0f;
         currentCombo = 0;
         comboMultiplier = 1f;
-        totalScore = 0;
         pushCount = 0;
         lastTrickName = "";
         
@@ -147,7 +146,6 @@ public class PlayerController : MonoBehaviour
 
     void Start()
     {
-        // If not initialized by GameManager, try to find one
         if (gameManager == null)
         {
             gameManager = FindObjectOfType<GameManager>();
@@ -163,13 +161,9 @@ public class PlayerController : MonoBehaviour
 
         if (boardVisual != null)
         {
-            // Store the initial mesh orientation as our base - this preserves the model's intended facing
             boardVisualBaseLocalRot = boardVisual.localRotation;
-            // Make sure the mesh is facing the movement direction (right) at start
             boardVisual.rotation = Quaternion.LookRotation(Vector3.right, Vector3.up);
-            // Store this aligned rotation as our new base
             boardVisualBaseLocalRot = boardVisual.localRotation;
-            Debug.Log($"Initial visual rotation: {boardVisual.localEulerAngles}");
         }
         else
         {
@@ -198,23 +192,14 @@ public class PlayerController : MonoBehaviour
         Rigidbody rb = GetComponent<Rigidbody>();
         if (rb == null) return;
 
-        // Get current up vector in world space
         Vector3 currentUp = transform.up;
         float upDot = Vector3.Dot(currentUp, Vector3.up);
         
-        // Check if we're significantly tilted
-        if (upDot < 0.95f) // about 18 degrees or more from vertical
+        if (upDot < 0.95f)
         {
-            // Calculate rotation to upright position
             Quaternion targetRotation = Quaternion.FromToRotation(currentUp, Vector3.up) * transform.rotation;
-            
-            // Smoothly rotate back to upright
             transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.fixedDeltaTime * 5f);
-            
-            // Zero out angular velocity to prevent fighting the correction
             rb.angularVelocity = Vector3.zero;
-            
-            // Ensure we maintain forward momentum
             Vector3 horizontalVelocity = new Vector3(rb.velocity.x, 0, rb.velocity.z);
             rb.velocity = horizontalVelocity + Vector3.up * rb.velocity.y;
         }
@@ -241,12 +226,10 @@ public class PlayerController : MonoBehaviour
 
             if (swipeDelta.magnitude < swipeThreshold)
             {
-                // small click = push if grounded
                 if (isGrounded) Push();
                 return;
             }
 
-            // Determine swipe direction
             float x = swipeDelta.x;
             float y = swipeDelta.y;
 
@@ -254,46 +237,21 @@ public class PlayerController : MonoBehaviour
             {
                 if (y > 0)
                 {
-                    if (isGrounded)
-                    {
-                        // Up swipe on ground = Ollie
-                        Ollie();
-                    }
-                    else
-                    {
-                        // Up swipe in air = Backflip
-                        Backflip();
-                    }
+                    if (isGrounded) Ollie();
+                    else Backflip();
                 }
                 else
                 {
-                    if (isGrounded)
-                    {
-                        //Manual(); REWRITE THIS LATER
-                    }
-                    else
-                    {
-                        // Down swipe in air = Frontflip
-                        Frontflip();
-                    }
+                    if (!isGrounded) Frontflip();
                 }
             }
             else
             {
-                if (x > 0)
-                {
-                    // Right swipe = Kickflip (ground or air)
-                    Kickflip();
-                }
-                else
-                {
-                    // Left swipe = Heelflip (ground or air)
-                    Heelflip();
-                }
+                if (x > 0) Kickflip();
+                else Heelflip();
             }
         }
 
-        // Right-click for shove-it / tre flip (ground or air)
         if (Input.GetMouseButtonDown(1))
         {
             if (Random.value > 0.5f) PopShoveIt();
@@ -329,7 +287,6 @@ public class PlayerController : MonoBehaviour
                 if (Mathf.Abs(y) > Mathf.Abs(x))
                 {
                     if (y > 0) Ollie();
-                    //else Manual();
                 }
                 else
                 {
@@ -340,7 +297,6 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    // ---------- MANUAL START / END ----------
     void StartManual()
     {
         cam.SetIgnoreRotation(true);
@@ -350,12 +306,9 @@ public class PlayerController : MonoBehaviour
         canOllie = false;
         manualFailTimer = 0f;
         isHoldingManual = true;
-
-        // start with a nose-up angle (positive = nose-up)
         manualTargetAngle = manualStartAngle;
 
-        // optionally smooth into start pose by lerping for a short time
-        StopAllCoroutines(); // stop previous coroutines that might conflict
+        StopAllCoroutines();
         StartCoroutine(SmoothApplyManualTarget(manualStartAngle, 0.15f));
 
         Debug.Log("Started Manual");
@@ -372,14 +325,12 @@ public class PlayerController : MonoBehaviour
         manualTargetAngle = 0f;
         manualFailTimer = 0f;
 
-        // smoothly return to base rotation
         StopAllCoroutines();
         StartCoroutine(SmoothApplyManualTarget(0f, 0.2f));
 
         if (failed)
         {
             Debug.Log("Manual Failed - Lost Balance!");
-            // add bail logic here
         }
         else
         {
@@ -387,7 +338,6 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    // ---------- SMOOTH APPLY COROUTINE ----------
     IEnumerator SmoothApplyManualTarget(float targetAngle, float duration)
     {
         float startAngle;
@@ -406,7 +356,6 @@ public class PlayerController : MonoBehaviour
         ApplyManualRotation(targetAngle);
     }
 
-    // helper to apply pitch relative to base rotation
     void ApplyManualRotation(float pitchDegrees)
     {
         if (boardVisual != null)
@@ -415,24 +364,19 @@ public class PlayerController : MonoBehaviour
             transform.localRotation = baseLocalRot * Quaternion.Euler(pitchDegrees, 0f, 0f);
     }
 
-    // helper to get current pitch relative to base rotation (reads back the pitch in degrees)
     float QuaternionToPitch(Quaternion currentLocal, Quaternion baseLocal)
     {
         Quaternion relative = Quaternion.Inverse(baseLocal) * currentLocal;
         Vector3 euler = relative.eulerAngles;
-        // convert from 0..360 to -180..180 for X
         float pitch = euler.x;
         if (pitch > 180f) pitch -= 360f;
         return pitch;
     }
 
-    // ---------- MANUAL INPUT (call this from Update) ----------
     void HandleManualInput()
     {
-        // --- START DETECTION: swipe down + hold (mouse or touch) ---
         if (!isManual)
         {
-            // Mouse
             if (Input.GetMouseButtonDown(0))
                 initialSwipePos = Input.mousePosition;
 
@@ -442,11 +386,9 @@ public class PlayerController : MonoBehaviour
                 if (swipeDelta.y < -30f && isGrounded)
                 {
                     StartManual();
-                    // keep isHoldingManual true here because button is still held
                 }
             }
 
-            // Touch
             if (Input.touchCount > 0)
             {
                 Touch t = Input.GetTouch(0);
@@ -462,28 +404,24 @@ public class PlayerController : MonoBehaviour
             }
         }
 
-        // --- WHILE IN MANUAL ---
         if (isManual)
         {
             Vector2 movementDelta = Vector2.zero;
             bool stillHolding = false;
 
-            // Mouse: hold and move mouse Y to balance
             if (Input.GetMouseButton(0))
             {
                 stillHolding = true;
-                // Use mouse delta for responsiveness
                 movementDelta.y = Input.GetAxis("Mouse Y");
             }
 
-            // Touch: use touch delta to balance
             if (Input.touchCount > 0)
             {
                 Touch t = Input.GetTouch(0);
                 if (t.phase == TouchPhase.Moved)
                 {
                     stillHolding = true;
-                    movementDelta.y = t.deltaPosition.y / 10f; // scale down
+                    movementDelta.y = t.deltaPosition.y / 10f;
                 }
                 else if (t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled)
                 {
@@ -493,20 +431,14 @@ public class PlayerController : MonoBehaviour
 
             if (!stillHolding)
             {
-                // user released hold -> end manual
                 EndManual();
                 return;
             }
 
-            // Adjust the target angle by input (note sign)
-            // Positive mouse/touch Y should *reduce* nose-up (pulling up), negative increases nose-up, tune as needed.
             manualTargetAngle += -movementDelta.y * manualTiltSpeed * Time.deltaTime;
             manualTargetAngle = Mathf.Clamp(manualTargetAngle, -maxManualAngle, maxManualAngle);
-
-            // Apply rotation immediately (or lerp for smoothness)
             ApplyManualRotation(manualTargetAngle);
 
-            // Check fail condition: if outside safe range for longer than fail time
             if (Mathf.Abs(manualTargetAngle) > manualSafeRange)
             {
                 manualFailTimer += Time.deltaTime;
@@ -516,20 +448,32 @@ public class PlayerController : MonoBehaviour
             else
             {
                 manualFailTimer = 0f;
-                // Add score per second while successfully balancing
                 if (trickScores.TryGetValue("Manual", out int baseScore))
                 {
                     float timePoints = Time.deltaTime * baseScore;
-                    totalScore += Mathf.RoundToInt(timePoints);
-
-                    // Update the UI so the player sees the score go up
-                    if (UIManager.Instance != null)
-                    {
-                        UIManager.Instance.UpdateScore(totalScore);
-                    }
+                    AddScoreToSystem(Mathf.RoundToInt(timePoints));
                 }
             }
         }
+    }
+
+    private bool DeterminePerfectLanding()
+    {
+        // Check board angle relative to ground
+        float angle = Vector3.Angle(transform.up, Vector3.up);
+        
+        // Check landing velocity
+        float landingSpeed = Mathf.Abs(rb.velocity.y);
+        
+        // Perfect landing = upright and low impact
+        bool perfect = angle < 15f && landingSpeed < 8f;
+        
+        if (perfect)
+        {
+            Debug.Log("✨ PERFECT LANDING!");
+        }
+        
+        return perfect;
     }
 
 
@@ -539,38 +483,42 @@ public class PlayerController : MonoBehaviour
         RaycastHit hit;
 
         bool wasGrounded = isGrounded;
-        
+
         if (staminaSystem != null)
         {
             staminaSystem.SetGrounded(isGrounded);
         }
+
         if (Physics.Raycast(rayOrigin, Vector3.down, out hit, raycastDistance, groundLayer))
         {
             isGrounded = true;
-            
-            // If we just landed
+
             if (!wasGrounded)
             {
+                lastGroundedTime = Time.time;
                 Rigidbody rb = GetComponent<Rigidbody>();
                 if (rb != null)
                 {
-                    // Reduce bouncing on landing
                     rb.velocity = new Vector3(rb.velocity.x, rb.velocity.y * 0.5f, rb.velocity.z);
-                    
-                    // Force immediate partial correction on landing
                     Vector3 groundNormal = hit.normal;
                     Quaternion landingRotation = Quaternion.FromToRotation(transform.up, groundNormal) * transform.rotation;
                     transform.rotation = Quaternion.Slerp(transform.rotation, landingRotation, 0.5f);
                 }
 
-                // Complete any active combo when landing
-                if (currentCombo > 0)
+                // FINALIZE COMBO ON LANDING
+                if (scoreSystem != null)
                 {
+                    // Determine if landing was perfect
+                    bool perfectLanding = DeterminePerfectLanding();
+                    scoreSystem.FinalizeCombo(perfectLanding);
+                }
+                else if (currentCombo > 0)
+                {
+                    // Fallback for regular score system
                     FinalizeCombo();
                 }
             }
 
-            // stop any visual trick coroutines? We keep rotation, but slerp back to forward
             StartCoroutine(RealignVisualOnLand(0.25f));
             if (cam != null) cam.SetIgnoreRotation(false);
         }
@@ -579,7 +527,6 @@ public class PlayerController : MonoBehaviour
             isGrounded = false;
         }
 
-        // detect grind rail
         if (Physics.Raycast(rayOrigin, Vector3.down, out hit, raycastDistance, grindLayer))
         {
             if (!isGrinding) StartCoroutine(StartGrind(hit));
@@ -589,10 +536,7 @@ public class PlayerController : MonoBehaviour
     private void Move()
     {
         if (!canMove) return;
-
-        // Movement is always to the RIGHT in world-space (local X axis pointing right on screen)
-        // Keep horizontal movement independent of visual rotation.
-        Vector3 horizontal = Vector3.right * moveSpeed; // always world-right
+        Vector3 horizontal = Vector3.right * moveSpeed;
         Vector3 newVel = new Vector3(horizontal.x, rb.velocity.y, horizontal.z);
         rb.velocity = newVel;
     }
@@ -625,6 +569,13 @@ public class PlayerController : MonoBehaviour
     {
         if (!canOllie || !isGrounded) return;
         
+        // CHECK STAMINA BEFORE PERFORMING TRICK
+        if (staminaSystem != null && !staminaSystem.HasEnoughStamina(staminaSystem.jumpCost))
+        {
+            Debug.Log("Not enough stamina to Ollie!");
+            return;
+        }
+        
         if (staminaSystem != null)
         {
             staminaSystem.OnJump();
@@ -633,82 +584,64 @@ public class PlayerController : MonoBehaviour
         rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
         Debug.Log("Ollie!");
     }
-    /*
-    void Manual()
-    {
-        if (!isGrounded) return;
-        Debug.Log("Manual!");
-        StartCoroutine(ManualRoutine());
-    }
-
-    IEnumerator ManualRoutine()
-    {
-        float manualTime = 1.5f;
-        float timer = 0;
-        float lastScore = 0f;
-        
-        while (timer < manualTime && isManual)  // Stop if manual ends
-        {
-            timer += Time.deltaTime;
-            
-            // Score points for maintaining manual
-            if (Mathf.Abs(manualTargetAngle) <= manualSafeRange)
-            {
-                float timePoints = Time.deltaTime * trickScores["Manual"];
-                totalScore += Mathf.RoundToInt(timePoints);
-                lastScore += timePoints;
-                
-                if (lastScore >= 50f)  // Log every 50 points
-                {
-                    Debug.Log($"Manual balance points: +{Mathf.RoundToInt(lastScore)}");
-                    lastScore = 0f;
-                }
-            }
-            
-            yield return null;
-        }
-    } DEFUNCT FOR NOW
-    */
 
     void Kickflip()
     {
+        // CHECK STAMINA BEFORE PERFORMING TRICK
+        if (staminaSystem != null && !staminaSystem.HasEnoughStamina(staminaSystem.basicTrickCost))
+        {
+            Debug.Log("Not enough stamina for Kickflip!");
+            return;
+        }
+        
         if (isGrounded)
         {
-            // Add upward force if starting from ground
             rb.AddForce(Vector3.up * jumpForce * 0.6f, ForceMode.Impulse);
         }
 
-        // Double tap within 0.3 seconds for multiple flips
         if (Time.time - lastTrickTime < 0.3f && lastTrickName == "Kickflip")
         {
-            StartFlip("Kickflip", Vector3.right, false, 2); // right = clockwise around Z
+            StartFlip("Kickflip", Vector3.right, false, 2);
         }
         else
         {
-            StartFlip("Kickflip", Vector3.right); // right = clockwise around Z
+            StartFlip("Kickflip", Vector3.right);
         }
     }
 
     void Heelflip()
     {
+        // CHECK STAMINA BEFORE PERFORMING TRICK
+        if (staminaSystem != null && !staminaSystem.HasEnoughStamina(staminaSystem.basicTrickCost))
+        {
+            Debug.Log("Not enough stamina for Heelflip!");
+            return;
+        }
+        
         if (isGrounded)
         {
-            // Add upward force if starting from ground
             rb.AddForce(Vector3.up * jumpForce * 0.6f, ForceMode.Impulse);
         }
 
         if (Time.time - lastTrickTime < 0.3f && lastTrickName == "Heelflip")
         {
-            StartFlip("Heelflip", Vector3.left, false, 2); // left = counter-clockwise around Z
+            StartFlip("Heelflip", Vector3.left, false, 2);
         }
         else
         {
-            StartFlip("Heelflip", Vector3.left); // left = counter-clockwise around Z
+            StartFlip("Heelflip", Vector3.left);
         }
     }
 
     void Backflip()
     {
+        // CHECK STAMINA BEFORE PERFORMING TRICK
+        if (staminaSystem != null && !staminaSystem.HasEnoughStamina(staminaSystem.complexTrickCost))
+        {
+            Debug.Log("Not enough stamina for Backflip!");
+            return;
+        }
+        
         if (Time.time - lastTrickTime < 0.3f && lastTrickName == "Backflip")
         {
             StartFlip("Backflip", Vector3.right, true, 2);
@@ -721,6 +654,13 @@ public class PlayerController : MonoBehaviour
 
     void Frontflip()
     {
+        // CHECK STAMINA BEFORE PERFORMING TRICK
+        if (staminaSystem != null && !staminaSystem.HasEnoughStamina(staminaSystem.complexTrickCost))
+        {
+            Debug.Log("Not enough stamina for Frontflip!");
+            return;
+        }
+        
         if (Time.time - lastTrickTime < 0.3f && lastTrickName == "Frontflip")
         {
             StartFlip("Frontflip", Vector3.left, true, 2);
@@ -733,29 +673,69 @@ public class PlayerController : MonoBehaviour
 
     void PopShoveIt()
     {
+        // CHECK STAMINA BEFORE PERFORMING TRICK
+        if (staminaSystem != null && !staminaSystem.HasEnoughStamina(staminaSystem.basicTrickCost))
+        {
+            Debug.Log("Not enough stamina for Pop Shove-It!");
+            return;
+        }
+        
         if (isGrounded)
         {
-            // Add upward force if starting from ground
             rb.AddForce(Vector3.up * jumpForce * 0.6f, ForceMode.Impulse);
         }
 
         Debug.Log("Pop Shove-It!");
-        cam.SetIgnoreRotation(true);
-        cam.TriggerCameraShake();
+        
+        // CONSUME STAMINA
+        if (staminaSystem != null)
+        {
+            staminaSystem.OnTrickStart(false);
+        }
+        
+        if (cam != null)
+        {
+            cam.SetIgnoreRotation(true);
+            cam.TriggerCameraShake();
+        }
+        
+        // ADD TO COMBO AND SCORE
+        AddToCombo("Pop Shove-It", 1);
+        
         StartCoroutine(VisualSpinRoutine(180, "Pop Shove-It"));
     }
 
     void TreFlip()
     {
+        // CHECK STAMINA BEFORE PERFORMING TRICK
+        if (staminaSystem != null && !staminaSystem.HasEnoughStamina(staminaSystem.complexTrickCost))
+        {
+            Debug.Log("Not enough stamina for Tre Flip!");
+            return;
+        }
+        
         if (isGrounded)
         {
-            // Add upward force if starting from ground
             rb.AddForce(Vector3.up * jumpForce * 0.6f, ForceMode.Impulse);
         }
 
         Debug.Log("360 Flip (Tre Flip)!");
-        cam.SetIgnoreRotation(true);
-        cam.TriggerCameraShake();
+        
+        // CONSUME STAMINA
+        if (staminaSystem != null)
+        {
+            staminaSystem.OnTrickStart(true);
+        }
+        
+        if (cam != null)
+        {
+            cam.SetIgnoreRotation(true);
+            cam.TriggerCameraShake();
+        }
+        
+        // ADD TO COMBO AND SCORE
+        AddToCombo("Tre Flip", 1);
+        
         StartCoroutine(VisualSpinRoutine(360, "Tre Flip"));
     }
 
@@ -790,7 +770,7 @@ public class PlayerController : MonoBehaviour
         rb.useGravity = false;
         rb.velocity = hit.collider.transform.forward * moveSpeed;
 
-        yield return new WaitForSeconds(2f); // basic grind duration
+        yield return new WaitForSeconds(2f);
 
         rb.useGravity = true;
         isGrinding = false;
@@ -801,19 +781,18 @@ public class PlayerController : MonoBehaviour
         Debug.Log("End Grind!");
     }
 
-    // Visual-only flip: rotates the board model around specified axis while physics stays
     IEnumerator VisualFlipRoutine(Vector3 axis, string trickName, bool isXAxisRotation = false, int flips = 1)
     {
         if (boardVisual == null)
         {
-            Debug.LogWarning("BoardVisual not assigned — visual flip will rotate the root. Assign a child Transform to boardVisual.");
+            Debug.LogWarning("BoardVisual not assigned – visual flip will rotate the root.");
         }
 
-        float duration = 0.5f * flips; // More time for multiple flips
+        float duration = 0.5f * flips;
         float elapsed = 0f;
         float totalRotation = 0f;
-        float targetRotation = 360f * flips; // Full rotation(s)
-        float currentRotationSpeed = rotationSpeed * (flips > 1 ? 1.5f : 1f); // Faster for multiple flips
+        float targetRotation = 360f * flips;
+        float currentRotationSpeed = rotationSpeed * (flips > 1 ? 1.5f : 1f);
 
         while (totalRotation < targetRotation)
         {
@@ -825,18 +804,15 @@ public class PlayerController : MonoBehaviour
             {
                 if (isXAxisRotation)
                 {
-                    // Front/backflip rotates around X axis (pitch)
                     boardVisual.Rotate(Vector3.right * delta * (axis.x > 0 ? 1 : -1), Space.Self);
                 }
                 else
                 {
-                    // Kick/heelflip rotates around Z axis (board's length)
                     boardVisual.Rotate(Vector3.forward * delta * (axis.x > 0 ? 1 : -1), Space.Self);
                 }
             }
             else
             {
-                // Fallback to root rotation
                 if (isXAxisRotation)
                 {
                     transform.Rotate(Vector3.right * delta * (axis.x > 0 ? 1 : -1), Space.Self);
@@ -849,16 +825,14 @@ public class PlayerController : MonoBehaviour
             yield return null;
         }
 
-        // keep visual rotation until landing; camera handled separately
         Debug.Log($"{trickName} completed ({flips}x flip, {totalRotation:F1} degrees)");
     }
 
-    // Visual-only spin (around Y axis)
     IEnumerator VisualSpinRoutine(float degrees, string trickName)
     {
         if (boardVisual == null)
         {
-            Debug.LogWarning("BoardVisual not assigned — visual spin will rotate the root. Assign a child Transform to boardVisual.");
+            Debug.LogWarning("BoardVisual not assigned – visual spin will rotate the root.");
         }
 
         float spun = 0f;
@@ -873,7 +847,7 @@ public class PlayerController : MonoBehaviour
             yield return null;
         }
 
-        Debug.Log($"{trickName} visual finished (still spinning until land)");
+        Debug.Log($"{trickName} visual finished");
     }
 
     IEnumerator GrindRoutine()
@@ -883,29 +857,22 @@ public class PlayerController : MonoBehaviour
         rb.useGravity = true;
     }
 
-    // Smoothly realign the visual model to match its initial orientation (facing movement direction)
     IEnumerator RealignVisualOnLand(float duration)
     {
         if (boardVisual == null) yield break;
 
         Quaternion start = boardVisual.localRotation;
-        
-        // Just return to our stored base rotation which was already aligned at Start()
         Quaternion targetLocal = boardVisualBaseLocalRot;
-        
-        Debug.Log($"Landing - Current:{start.eulerAngles}, Target:{targetLocal.eulerAngles}");
 
         float elapsed = 0f;
         while (elapsed < duration)
         {
             elapsed += Time.deltaTime;
-            // Use SmoothStep for ease-in/out transition
             float t = Mathf.SmoothStep(0f, 1f, elapsed / duration);
             boardVisual.localRotation = Quaternion.Slerp(start, targetLocal, t);
             yield return null;
         }
 
-        // Ensure final rotation is exact
         boardVisual.localRotation = targetLocal;
     }
 
@@ -932,42 +899,31 @@ public class PlayerController : MonoBehaviour
         moveSpeed = targetSpeed;
     }
 
-    // Combo System Methods
     private void AddToCombo(string trickName, int multiplier = 1)
     {
         float currentTime = Time.time;
         
-        // Check if within combo window
         if (currentTime - lastTrickTime <= comboTimeWindow)
         {
-            // Don't allow same trick twice in a row
             if (trickName != lastTrickName)
             {
                 currentCombo++;
-                comboMultiplier = 1f + (currentCombo * 0.5f); // Each combo adds 50% bonus
+                comboMultiplier = 1f + (currentCombo * 0.5f);
             }
         }
         else
         {
-            // Start new combo
             currentCombo = 1;
             comboMultiplier = 1f;
         }
 
-        // Update UI through UIManager
-        if (UIManager.Instance != null)
-        {
-            UIManager.Instance.UpdateScore(totalScore);
-        }
-
-        // Calculate score with error handling
         if (trickScores.TryGetValue(trickName, out int baseScore))
         {
             int scoreAdd = Mathf.RoundToInt(baseScore * comboMultiplier * multiplier);
-            totalScore += scoreAdd;
-            Debug.Log($"{trickName} x{multiplier} (Combo x{comboMultiplier:F1}) = +{scoreAdd} points! Total: {totalScore}");
+            AddScoreToSystem(scoreAdd);
             
-            // Spawn combo text slightly above the player
+            Debug.Log($"{trickName} x{multiplier} (Combo x{comboMultiplier:F1}) = +{scoreAdd} points!");
+            
             if (UIManager.Instance != null)
             {
                 Vector3 textPosition = transform.position + Vector3.up * 1.5f;
@@ -977,19 +933,15 @@ public class PlayerController : MonoBehaviour
         else
         {
             Debug.LogWarning($"No score defined for trick: {trickName}");
-            // Use a default score to ensure tricks always count
             int defaultScore = 100;
             int scoreAdd = Mathf.RoundToInt(defaultScore * comboMultiplier * multiplier);
-            totalScore += scoreAdd;
+            AddScoreToSystem(scoreAdd);
             
-            // Spawn combo text even for undefined tricks
             if (UIManager.Instance != null)
             {
                 Vector3 textPosition = transform.position + Vector3.up * 1.5f;
                 UIManager.Instance.SpawnTrickText(trickName, textPosition, multiplier, comboMultiplier);
             }
-            
-            Debug.Log($"{trickName} x{multiplier} (Default Score) = +{scoreAdd} points! Total: {totalScore}");
         }
 
         lastTrickName = trickName;
@@ -1007,7 +959,6 @@ public class PlayerController : MonoBehaviour
         lastTrickName = "";
     }
 
-    // Multiple flip variations
     private void StartFlip(string trickName, Vector3 axis, bool isXAxisRotation = false, int flips = 1)
     {
         if (staminaSystem != null)
@@ -1031,9 +982,41 @@ public class PlayerController : MonoBehaviour
         }
         StartCoroutine(VisualFlipRoutine(axis, multipleTrickName, isXAxisRotation, flips));
 
-        // Add to combo with multiplier based on number of flips
         AddToCombo(trickName, flips);
     }
     
-    public void ResetForNewLevel() { }
+    // HELPER METHOD TO ADD SCORE TO SCORE SYSTEM
+    private void AddScoreToSystem(int points)
+    {
+        Debug.Log($"PlayerController: Attempting to add {points} points to score system");
+        
+        if (scoreSystem != null)
+        {
+            scoreSystem.AddScore(points);
+            Debug.Log($"PlayerController: Score added successfully. Current score: {scoreSystem.GetCurrentScore()}");
+        }
+        else
+        {
+            Debug.LogError("PlayerController: scoreSystem is NULL!");
+        }
+        
+        // Update UI - This might be redundant since ScoreSystem.AddScore already does this
+        // But keeping it as a safety net
+        if (UIManager.Instance != null)
+        {
+            int currentScore = scoreSystem != null ? scoreSystem.GetCurrentScore() : 0;
+            UIManager.Instance.UpdateScore(currentScore);
+            Debug.Log($"PlayerController: UI updated with score: {currentScore}");
+        }
+        else
+        {
+            Debug.LogError("PlayerController: UIManager.Instance is NULL!");
+        }
+    }
+
+    
+    public void ResetForNewLevel() 
+    {
+        ResetState();
+    }
 }

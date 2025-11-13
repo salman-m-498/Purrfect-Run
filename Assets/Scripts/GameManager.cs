@@ -223,6 +223,45 @@ public class GameManager : MonoBehaviour
         Application.Quit();
     }
 
+    // ==================== SCORE SYSTEM INTEGRATION ====================
+
+    // Add this helper method to GameManager to get current score
+    public int GetCurrentScore()
+    {
+        return scoreSystem != null ? scoreSystem.GetCurrentScore() : 0;
+    }
+
+    // Update the CheckLevelCompletion method to use proper score tracking
+    private void CheckLevelCompletion()
+    {
+        bool passed = false;
+
+        // Check completion based on level type
+        if (currentLevelInRound == 3)
+        {
+            // Skill Check level
+            passed = skillCheckSystem != null && skillCheckSystem.IsChallengePassed();
+        }
+        else
+        {
+            // Normal level - check score requirement - FIXED: Use GetCurrentScore()
+            int currentScore = GetCurrentScore();
+            int required = CalculateScoreRequirement();
+            passed = currentScore >= required;
+            
+            Debug.Log($"Level Check - Score: {currentScore}/{required} - Passed: {passed}");
+        }
+
+        if (passed)
+        {
+            ChangeGameState(GameState.LevelComplete);
+        }
+        else
+        {
+            ChangeGameState(GameState.LevelFailed);
+        }
+    }
+
     // ==================== RUN MANAGEMENT ====================
 
     public void StartNewRun()
@@ -238,9 +277,11 @@ public class GameManager : MonoBehaviour
         // Reset player run data (not persistent data)
         playerData.ResetRunData();
 
-        // Reset systems
+        // Reset systems - FIXED: Reset run score instead of level score
         if (scoreSystem != null)
-            scoreSystem.ResetScore();
+        {
+            scoreSystem.ResetRunScore();  // NEW: Reset entire run score
+        }
         if (staminaSystem != null)
             staminaSystem.ResetStamina();
         if (itemSystem != null)
@@ -251,6 +292,7 @@ public class GameManager : MonoBehaviour
         // Start first level
         ChangeGameState(GameState.Playing);
     }
+
 
     // ==================== LEVEL FLOW ====================
 
@@ -276,9 +318,11 @@ public class GameManager : MonoBehaviour
         if (playerController != null)
             playerController.ResetForNewLevel();
 
-        // Reset score for this level
+        // Reset score for THIS LEVEL (not entire run) - FIXED
         if (scoreSystem != null)
-            scoreSystem.ResetScore();
+        {
+            scoreSystem.ResetScore();  // This now properly tracks level vs run score
+        }
 
         // Update UI
         if (uiManager != null)
@@ -289,6 +333,7 @@ public class GameManager : MonoBehaviour
 
         Debug.Log($"GameManager: Started Level - Round {currentRound}, Level {currentLevelInRound}/{3} ({levelType})");
     }
+
 
     private void StartSkillCheck()
     {
@@ -313,43 +358,23 @@ public class GameManager : MonoBehaviour
         CheckLevelCompletion();
     }
 
-    private void CheckLevelCompletion()
-    {
-        bool passed = false;
-
-        // Check completion based on level type
-        if (currentLevelInRound == 3)
-        {
-            // Skill Check level
-            passed = skillCheckSystem != null && skillCheckSystem.IsChallengePassed();
-        }
-        else
-        {
-            // Normal level - check score requirement
-            int currentScore = scoreSystem != null ? scoreSystem.GetCurrentScore() : 0;
-            int required = CalculateScoreRequirement();
-            passed = currentScore >= required;
-        }
-
-        if (passed)
-        {
-            ChangeGameState(GameState.LevelComplete);
-        }
-        else
-        {
-            ChangeGameState(GameState.LevelFailed);
-        }
-    }
-
     public void OnLevelCompleted(bool success, int score, float time)
-{
-    Debug.Log($"Level Completed: Success={success}, Score={score}, Time={time}");
-}
-
+    {
+        Debug.Log($"Level Completed: Success={success}, Score={score}, Time={time}");
+    }
 
     private void HandleLevelComplete()
     {
         totalLevelsCompleted++;
+        
+        // IMPORTANT: Finalize the level score BEFORE getting it
+        if (scoreSystem != null)
+        {
+            scoreSystem.FinalizeLevelScore(); // Add current level score to run total
+        }
+        
+        // NOW get the current level score (which was just finalized)
+        int currentScore = GetCurrentScore();
         
         // Award coins based on performance
         int coinsEarned = CalculateCoinsEarned();
@@ -359,11 +384,11 @@ public class GameManager : MonoBehaviour
         if (currentRound > highestRoundReached)
             highestRoundReached = currentRound;
 
-        // Save high scores
-        int currentScore = scoreSystem != null ? scoreSystem.GetCurrentScore() : 0;
-        if (currentScore > playerData.highScore)
+        // Save high scores - Use total run score for high score tracking
+        int totalScore = scoreSystem != null ? scoreSystem.GetTotalRunScore() : 0;
+        if (totalScore > playerData.highScore)
         {
-            playerData.highScore = currentScore;
+            playerData.highScore = totalScore;
             playerData.SaveToPlayerPrefs();
         }
 
@@ -375,24 +400,27 @@ public class GameManager : MonoBehaviour
             LevelResultData results = new LevelResultData
             {
                 passed = true,
-                score = currentScore,
+                score = currentScore,  // Show level score
                 coinsEarned = coinsEarned,
                 levelTime = levelManager != null ? levelManager.GetLevelTime() : 0f
             };
             uiManager.ShowLevelResults(results);
         }
 
-        Debug.Log($"GameManager: Level Complete! Coins earned: {coinsEarned}");
+        Debug.Log($"GameManager: Level Complete! Score: {currentScore}, Total Run Score: {totalScore}, Coins earned: {coinsEarned}");
     }
+
 
     private void HandleLevelFailed()
     {
         OnLevelEnded?.Invoke(false);
 
+        // Get current level score - FIXED
+        int currentScore = GetCurrentScore();
+
         // Show results
         if (uiManager != null)
         {
-            int currentScore = scoreSystem != null ? scoreSystem.GetCurrentScore() : 0;
             LevelResultData results = new LevelResultData
             {
                 passed = false,
@@ -404,7 +432,7 @@ public class GameManager : MonoBehaviour
             uiManager.ShowLevelResults(results);
         }
 
-        Debug.Log("GameManager: Level Failed");
+        Debug.Log($"GameManager: Level Failed - Score: {currentScore}/{CalculateScoreRequirement()}");
     }
 
     // ==================== PROGRESSION FLOW ====================

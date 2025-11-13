@@ -10,7 +10,6 @@ GameObject:
   m_Component:
   - component: {fileID: 4688130077697307879}
   - component: {fileID: 125831783339448925}
-  - component: {fileID: 2810053114686785439}
   m_Layer: 0
   m_Name: Game Manager
   m_TagString: Untagged
@@ -46,46 +45,38 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   playerController: {fileID: 0}
-  dollyCam: {fileID: 0}
-  boardVisual: {fileID: 0}
-  comboTextSpawner: {fileID: 0}
-  scoreText: {fileID: 6946536651112335832, guid: 9ccf464b9eff83543bfcea35d3464ef2, type: 3}
-  comboText: {fileID: 6946536651112335832, guid: 9ccf464b9eff83543bfcea35d3464ef2, type: 3}
-  isPaused: 0
-  gameStarted: 0
-  groundLayer:
-    serializedVersion: 2
-    m_Bits: 64
-  grindLayer:
-    serializedVersion: 2
-    m_Bits: 128
---- !u!114 &2810053114686785439
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 3595759965372316351}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: bc790a62b071e4c4dbe6c4ca95ead1dd, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  maxStamina: 100
-  currentStamina: 100
-  staminaRegenRate: 2
-  staminaDecayRate: 1
-  lowStaminaThreshold: 15
-  criticalStaminaThreshold: 30
-  pushRestore: 15
-  grindRegenRate: 5
-  perfectLandBonus: -15
-  basicTrickCost: 20
-  complexTrickCost: 40
-  grindStartCost: 10
-  jumpCost: 5
-  specialTrickCost: 50
-  boostCost: 25
-  staminaBarUI: {fileID: 0}
-  playerController: {fileID: 0}
-  mainCamera: {fileID: 0}
+  levelManager: {fileID: 0}
+  scoreSystem: {fileID: 0}
+  staminaSystem: {fileID: 0}
+  storeManager: {fileID: 0}
+  uiManager: {fileID: 0}
+  skillCheckSystem: {fileID: 0}
+  itemSystem: {fileID: 0}
+  cam: {fileID: 0}
+  currentState: 0
+  currentRound: 1
+  currentLevelInRound: 1
+  totalLevelsCompleted: 0
+  maxRoundsPerRun: 10
+  playerData:
+    highScore: 0
+    totalRuns: 0
+    totalVictories: 0
+    totalPlayTime: 0
+    highestRoundReached: 0
+    lifetimeCoins: 0
+    unlockedItems: []
+    unlockedBoards: []
+    currentBoard: default
+    coins: 0
+    itemsOwnedThisRun: []
+    bestScoreThisRun: 0
+    totalTricksThisRun: 0
+    totalCombosThisRun: 0
+  runStartTime: 0
+  totalRunTime: 0
+  highestRoundReached: 0
+  totalCoinsEarnedThisRun: 0
+  baseScoreRequirement: 5000
+  scoreMultiplierPerLevel: 1.2
+  baseLevelDuration: 60
