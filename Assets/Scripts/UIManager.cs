@@ -32,11 +32,12 @@ public class UIManager : MonoBehaviour
     }
     #endregion
 
-    [Header("=== EXISTING UI REFERENCES ===")]
+    [Header("=== UI REFERENCES ===")]
     public StaminaBarUI staminaBarPrefab;
     private StaminaBarUI staminaBarInstance;
     public ComboTextSpawner comboTextSpawnerPrefab;
     private ComboTextSpawner comboTextSpawnerInstance;
+    public TrickText trickTextPrefab;
     public Canvas uiCanvas;
 
     [Header("=== SCORE & ROUND DISPLAY ===")]
@@ -195,15 +196,42 @@ public class UIManager : MonoBehaviour
         }
     }
 
+    // ==================== TRICK TEXT SPAWNER ====================
+
     /// <summary>
-    /// Spawns a combo or trick text at a world position.
+    /// Spawns an animated text pop-up at the player's position, converting it to screen space.
     /// </summary>
-    public void SpawnTrickText(string trickName, Vector3 worldPosition, int multiplier = 1, float comboMultiplier = 1f)
+    /// <param name="trickName">Name of the trick (e.g., "Kickflip")</param>
+    /// <param name="worldPosition">The player's world position where the trick was performed.</param>
+    /// <param name="score">The score received for the trick/grind.</param>
+    /// <param name="comboMultiplier">The current combo multiplier.</param>
+    public void SpawnTrickText(string trickName, Vector3 worldPosition, int score, float comboMultiplier)
     {
-        if (comboTextSpawnerInstance != null)
+        if (trickTextPrefab == null)
         {
-            comboTextSpawnerInstance.SpawnTrickText(trickName, worldPosition, multiplier, comboMultiplier);
+            Debug.LogError("TrickText Prefab is not assigned in UIManager!");
+            return;
         }
+
+        // 1. Convert World Position to Screen Position
+        Vector3 screenPos = Camera.main.WorldToScreenPoint(worldPosition);
+
+        // Check if the object is visible and in front of the camera
+        if (screenPos.z < 0) return;
+
+        // 2. Instantiate the prefab as a child of the UI Canvas
+        TrickText trickTextInstance = Instantiate(trickTextPrefab, uiCanvas.transform);
+        
+        // 3. Set the position of the instantiated object.
+        // Screen position is already relative to the bottom-left of the screen, which is what the Canvas uses.
+        trickTextInstance.transform.position = screenPos;
+
+        // 4. Initialize and start the animation
+        trickTextInstance.Setup(trickName, score, comboMultiplier);
+        
+        // Give it a slight random horizontal offset for visual separation when spamming tricks
+        float randomOffset = UnityEngine.Random.Range(-50f, 50f);
+        trickTextInstance.transform.position += new Vector3(randomOffset, 0, 0);
     }
 
     // ==================== ANIMATED SCORE COUNT ====================
@@ -212,27 +240,29 @@ public class UIManager : MonoBehaviour
     {
         float duration = 0.3f;
         float elapsed = 0f;
-        
+
         while (elapsed < duration)
         {
             elapsed += Time.deltaTime;
             float t = Mathf.Clamp01(elapsed / duration);
-            
+
             // Ease out cubic
             t = 1f - Mathf.Pow(1f - t, 3f);
-            
+
             int current = Mathf.RoundToInt(Mathf.Lerp(from, to, t));
             scoreText.text = current.ToString("N0");
             scoreText.ForceMeshUpdate();
             displayedScore = current;
-            
+
             yield return null;
         }
-        
+
         scoreText.text = to.ToString("N0");
         scoreText.ForceMeshUpdate();
         displayedScore = to;
     }
+    
+    
 
     // ==================== COMBO SYSTEM HANDLERS (Subscribed to ScoreSystem) ====================
 

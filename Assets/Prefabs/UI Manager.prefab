@@ -1,0 +1,67 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &294828870997901049
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2238657977320547116}
+  - component: {fileID: 8677187127141010037}
+  m_Layer: 0
+  m_Name: UI Manager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &2238657977320547116
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 294828870997901049}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &8677187127141010037
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 294828870997901049}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cbe894202f5a1d448acffcf39a0aed0c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  staminaBarPrefab: {fileID: 4686092776320680850, guid: 2f11e627f24b059418c91cd28de5c15a, type: 3}
+  comboTextSpawnerPrefab: {fileID: 0}
+  trickTextPrefab: {fileID: 3695166817167561488, guid: 9ccf464b9eff83543bfcea35d3464ef2, type: 3}
+  uiCanvas: {fileID: 0}
+  scoreText: {fileID: 0}
+  roundText: {fileID: 6946536651112335832, guid: 0fb96ea2786d2dd40ae4c71aeb40fa49, type: 3}
+  comboPanel: {fileID: 0}
+  comboCountText: {fileID: 0}
+  comboMultiplierText: {fileID: 0}
+  comboScoreText: {fileID: 0}
+  comboTimerBar: {fileID: 0}
+  comboGlowEffect: {fileID: 0}
+  multiplierText: {fileID: 0}
+  multiplierFillBar: {fileID: 0}
+  tricksCountText: {fileID: 0}
+  perfectLandingsText: {fileID: 0}
+  biggestComboText: {fileID: 0}
+  megaComboEffect: {fileID: 0}
+  onFireEffect: {fileID: 0}
+  comboSound: {fileID: 0}
+  megaComboSound: {fileID: 0}

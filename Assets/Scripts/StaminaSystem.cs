@@ -9,8 +9,10 @@ public class StaminaSystem : MonoBehaviour
     [Header("Stamina Settings")]
     public float maxStamina = 100f;
     public float currentStamina = 100f;
-    [Tooltip("Base stamina regeneration per second when grounded")]
-    public float staminaRegenRate = 3f;
+    [Tooltip("Base stamina regeneration per second")]
+    public float staminaRegenRate = 5f;
+    [Tooltip("Bonus regen when grounded")]
+    public float groundedRegenBonus = 2f;
     [Tooltip("Passive stamina decay per second")]
     public float staminaDecayRate = 0.2f;
     [Tooltip("Stamina level below which tricks are disabled")]
@@ -21,7 +23,7 @@ public class StaminaSystem : MonoBehaviour
     [Header("Action Costs / Gains")]
     public float pushRestore = 15f;
     public float grindRegenRate = 5f;
-    public float perfectLandBonus = 10f;
+    public float perfectLandBonus = 15f;
     public float basicTrickCost = 15f;
     public float complexTrickCost = 25f;
     public float grindStartCost = 5f;
@@ -92,15 +94,31 @@ public class StaminaSystem : MonoBehaviour
 
     private void HandleStaminaDecay()
     {
-        // Passive stamina decay over time
-        ModifyStamina(staminaDecayRate * Time.deltaTime);
+        // Only decay when performing tricks
+        if (isPerformingTrick)
+        {
+            ModifyStamina(staminaDecayRate * Time.deltaTime);
+        }
     }
 
     private void HandleStaminaRegen()
     {
-        if (isGrounded && !isPerformingTrick)
+        // Always regenerate when not performing tricks
+        if (!isPerformingTrick)
         {
-            float regenAmount = isGrinding ? grindRegenRate : staminaRegenRate;
+            float regenAmount = staminaRegenRate;
+            
+            // Bonus regen when grinding
+            if (isGrinding)
+            {
+                regenAmount += grindRegenRate;
+            }
+            // Bonus regen when grounded
+            else if (isGrounded)
+            {
+                regenAmount += groundedRegenBonus;
+            }
+            
             ModifyStamina(-regenAmount * Time.deltaTime); // Negative = restore
         }
     }
@@ -118,6 +136,8 @@ public class StaminaSystem : MonoBehaviour
 
         ModifyStamina(-actualRestore); // Negative = restore
         lastPushTime = Time.time;
+        
+        Debug.Log($"Push restore: +{actualRestore} stamina (Now: {currentStamina:F1})");
     }
 
     public void OnTrickStart(bool isComplex)
@@ -127,10 +147,15 @@ public class StaminaSystem : MonoBehaviour
         {
             ModifyStamina(cost); // Positive = consume
             isPerformingTrick = true;
+            Debug.Log($"Trick started: -{cost} stamina (Now: {currentStamina:F1})");
         }
     }
 
-    public void OnTrickEnd() => isPerformingTrick = false;
+    public void OnTrickEnd()
+    {
+        isPerformingTrick = false;
+        Debug.Log($"Trick ended. Stamina will now regenerate.");
+    }
 
     public void OnGrindStart()
     {
@@ -138,32 +163,53 @@ public class StaminaSystem : MonoBehaviour
         {
             ModifyStamina(grindStartCost);
             isGrinding = true;
+            Debug.Log($"Grind started: -{grindStartCost} stamina (Now: {currentStamina:F1})");
         }
     }
 
-    public void OnGrindEnd() => isGrinding = false;
+    public void OnGrindEnd()
+    {
+        isGrinding = false;
+        Debug.Log($"Grind ended. Stamina: {currentStamina:F1}");
+    }
 
     public void OnJump()
     {
         if (HasEnoughStamina(jumpCost))
+        {
             ModifyStamina(jumpCost);
+            Debug.Log($"Jump: -{jumpCost} stamina (Now: {currentStamina:F1})");
+        }
     }
 
-    public void OnPerfectLand() => ModifyStamina(-perfectLandBonus);
+    public void OnPerfectLand()
+    {
+        ModifyStamina(-perfectLandBonus); // Negative = restore
+        Debug.Log($"⭐ PERFECT LANDING! +{perfectLandBonus} stamina bonus (Now: {currentStamina:F1})");
+    }
 
     public void OnSpecialTrick()
     {
         if (HasEnoughStamina(specialTrickCost))
+        {
             ModifyStamina(specialTrickCost);
+            Debug.Log($"Special trick: -{specialTrickCost} stamina (Now: {currentStamina:F1})");
+        }
     }
 
     public void OnBoost()
     {
         if (HasEnoughStamina(boostCost))
+        {
             ModifyStamina(boostCost);
+            Debug.Log($"Boost: -{boostCost} stamina (Now: {currentStamina:F1})");
+        }
     }
 
-    public void SetGrounded(bool grounded) => isGrounded = grounded;
+    public void SetGrounded(bool grounded)
+    {
+        isGrounded = grounded;
+    }
 
     // ===================== VISUALS & FEEDBACK =====================
 
@@ -185,14 +231,26 @@ public class StaminaSystem : MonoBehaviour
     private void DisableTricks()
     {
         if (playerController != null)
+        {
             playerController.canOllie = false;
+            Debug.LogWarning("⚠️ Low stamina! Tricks disabled.");
+        }
     }
 
     private void EnableTricks()
     {
         if (playerController != null)
+        {
             playerController.canOllie = true;
+            Debug.Log("✓ Stamina recovered! Tricks enabled.");
+        }
     }
 
-    public void ResetStamina() { }
+    public void ResetStamina()
+    {
+        currentStamina = maxStamina;
+        isGrinding = false;
+        isPerformingTrick = false;
+        Debug.Log("Stamina reset to full.");
+    }
 }

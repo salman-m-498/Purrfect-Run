@@ -27,24 +27,15 @@ public class PlayerController : MonoBehaviour
     public float manualReturnSpeed = 5f;
     public float manualFailTime = 0.5f;
 
-    private float manualTargetAngle = 0f;
-    private float manualFailTimer = 0f;
-    private bool isHoldingManual = false;
-    private Vector2 initialSwipePos;
-
-    private DollyCam cam;
-    private GameManager gameManager;
-    private StaminaSystem staminaSystem;
-    private ScoreSystem scoreSystem;
-
+    [Header("Grind Settings")]
+    public float grindJumpOffForce = 1.5f;
+    public float grindDetectionRadius = 0.3f;
+    
     [Header("References")]
     public Transform boardVisual;
-    private Quaternion baseLocalRot;
-    private Quaternion boardVisualBaseLocalRot;
 
     [Header("State")]
     public bool isGrounded;
-    private float lastGroundedTime = 0f;
     public bool canMove = true;
     public bool canPush = true;
     public bool canOllie = true;
@@ -54,13 +45,41 @@ public class PlayerController : MonoBehaviour
     public int currentCombo = 0;
     public float comboMultiplier = 1f;
     public float comboTimeWindow = 1.5f;
-    private float lastTrickTime;
-    private string lastTrickName = "";
 
+    [Header("Collision Layers")]
+    public LayerMask groundLayer;
+    public LayerMask grindLayer;
+    public float raycastDistance = 0.2f;
+
+    public int maxPushes = 5;
     public float CurrentAirTime => 0f;
     public float CurrentSpeed => 0f;
     public bool LastLandingPerfect => false;
-    
+
+    // Private variables
+    private float manualTargetAngle = 0f;
+    private float manualFailTimer = 0f;
+    private bool isHoldingManual = false;
+    private Vector2 initialSwipePos;
+    private float lastGroundedTime = 0f;
+    private float lastTrickTime;
+    private string lastTrickName = "";
+    private Quaternion baseLocalRot;
+    private Quaternion boardVisualBaseLocalRot;
+    private Rigidbody rb;
+    private int pushCount = 0;
+    private float targetSpeed;
+    private Coroutine currentPushRoutine;
+    private Vector2 startTouchPos;
+    private Vector2 endTouchPos;
+    private Collider currentGrindCollider = null;
+
+    // References
+    private DollyCam cam;
+    private GameManager gameManager;
+    private StaminaSystem staminaSystem;
+    private ScoreSystem scoreSystem;
+
     private readonly Dictionary<string, int> trickScores = new Dictionary<string, int>()
     {
         {"Ollie", 100},
@@ -70,22 +89,13 @@ public class PlayerController : MonoBehaviour
         {"Tre Flip", 500},
         {"Backflip", 400},
         {"Frontflip", 400},
-        {"Manual", 50}
+        {"Manual", 50},
+        {"Grind", 75}
     };
 
-    public LayerMask groundLayer;
-    public LayerMask grindLayer;
-    public float raycastDistance = 0.2f;
-
-    private Rigidbody rb;
-    private int pushCount = 0;
-    public int maxPushes = 5;
-
-    private float targetSpeed;
-    private Coroutine currentPushRoutine;
-
-    private Vector2 startTouchPos;
-    private Vector2 endTouchPos;
+    // ============================================================
+    // INITIALIZATION
+    // ============================================================
 
     public void Initialize(GameManager manager)
     {
@@ -110,7 +120,6 @@ public class PlayerController : MonoBehaviour
         
         if (boardVisual != null)
         {
-            boardVisualBaseLocalRot = boardVisual.localRotation;
             boardVisual.rotation = Quaternion.LookRotation(Vector3.right, Vector3.up);
             boardVisualBaseLocalRot = boardVisual.localRotation;
         }
@@ -130,6 +139,8 @@ public class PlayerController : MonoBehaviour
         comboMultiplier = 1f;
         pushCount = 0;
         lastTrickName = "";
+        isGrinding = false;
+        currentGrindCollider = null;
         
         if (rb != null)
         {
@@ -161,7 +172,6 @@ public class PlayerController : MonoBehaviour
 
         if (boardVisual != null)
         {
-            boardVisualBaseLocalRot = boardVisual.localRotation;
             boardVisual.rotation = Quaternion.LookRotation(Vector3.right, Vector3.up);
             boardVisualBaseLocalRot = boardVisual.localRotation;
         }
@@ -171,25 +181,199 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    // ============================================================
+    // UPDATE LOOPS
+    // ============================================================
+
     void Update()
     {
         HandleInput();
         HandleManualInput();
         Grounded();
+        CheckGrindStatus();
     }
 
     private void FixedUpdate()
     {
         Move();
-        if (isGrounded)
+        
+        if (isGrounded && !isGrinding)
         {
             CorrectBoardOrientation();
         }
+        
+        // Score points while grinding
+        if (isGrinding)
+        {
+            ScoreGrindPoints();
+        }
+    }
+
+    // ============================================================
+    // GRIND SYSTEM (SIMPLIFIED)
+    // ============================================================
+
+    private void CheckGrindStatus()
+    {
+        // Only check for grinding when in the air
+        if (isGrounded)
+        {
+            if (isGrinding)
+            {
+                EndGrind();
+            }
+            return;
+        }
+
+        RaycastHit hit;
+        Vector3 rayOrigin = transform.position;
+        
+        // Check if we're near a grindable surface
+        if (Physics.Raycast(rayOrigin, Vector3.down, out hit, grindDetectionRadius, grindLayer))
+        {
+            // Start grinding if we're not already
+            if (!isGrinding && rb.velocity.y <= 0.5f)
+            {
+                StartGrind(hit.collider);
+            }
+        }
+        else if (isGrinding)
+        {
+            // We've left the grind surface
+            EndGrind();
+        }
+    }
+
+    private void StartGrind(Collider grindCollider)
+    {
+        if (isGrinding && currentGrindCollider == grindCollider) return;
+        
+        isGrinding = true;
+        currentGrindCollider = grindCollider;
+        
+        Debug.Log($"Started Grind on: {grindCollider.name}");
+        
+        if (staminaSystem != null)
+        {
+            staminaSystem.OnGrindStart();
+        }
+        
+        AddToCombo("Grind", 1);
+    }
+
+    private void EndGrind()
+    {
+        if (!isGrinding) return;
+        
+        isGrinding = false;
+        currentGrindCollider = null;
+        
+        if (staminaSystem != null)
+        {
+            staminaSystem.OnGrindEnd();
+        }
+        
+        Debug.Log("Grind Ended");
+    }
+
+    private void ScoreGrindPoints()
+    {
+        if (trickScores.TryGetValue("Grind", out int baseScore))
+        {
+            float timePoints = Time.fixedDeltaTime * baseScore;
+            AddScoreToSystem(Mathf.RoundToInt(timePoints));
+        }
+    }
+
+    // ============================================================
+    // GROUND DETECTION
+    // ============================================================
+
+    private void Grounded()
+    {
+        Vector3 rayOrigin = transform.position;
+        RaycastHit hit;
+        bool wasGrounded = isGrounded;
+
+        if (staminaSystem != null)
+        {
+            staminaSystem.SetGrounded(isGrounded);
+        }
+
+        // Ground check
+        if (Physics.Raycast(rayOrigin, Vector3.down, out hit, raycastDistance, groundLayer))
+        {
+            isGrounded = true;
+
+            if (!wasGrounded)
+            {
+                lastGroundedTime = Time.time;
+                
+                if (rb != null)
+                {
+                    rb.velocity = new Vector3(rb.velocity.x, rb.velocity.y * 0.5f, rb.velocity.z);
+                    Vector3 groundNormal = hit.normal;
+                    Quaternion landingRotation = Quaternion.FromToRotation(transform.up, groundNormal) * transform.rotation;
+                    transform.rotation = Quaternion.Slerp(transform.rotation, landingRotation, 0.5f);
+                }
+
+                // Finalize combo on landing
+                bool perfectLanding = DeterminePerfectLanding();
+                
+                if (scoreSystem != null)
+                {
+                    scoreSystem.FinalizeCombo(perfectLanding);
+                }
+                else if (currentCombo > 0)
+                {
+                    FinalizeCombo();
+                }
+                
+                // Reward perfect landing with stamina bonus
+                if (perfectLanding && staminaSystem != null)
+                {
+                    staminaSystem.OnPerfectLand();
+                }
+                
+                StartCoroutine(RealignVisualOnLand(0.25f));
+                if (cam != null) cam.SetIgnoreRotation(false);
+            }
+        }
+        else
+        {
+            isGrounded = false;
+        }
+    }
+
+    private bool DeterminePerfectLanding()
+    {
+        float angle = Vector3.Angle(transform.up, Vector3.up);
+        float landingSpeed = Mathf.Abs(rb.velocity.y);
+        bool perfect = angle < 15f && landingSpeed < 8f;
+        
+        if (perfect)
+        {
+            Debug.Log("✨ PERFECT LANDING!");
+        }
+        
+        return perfect;
+    }
+
+    // ============================================================
+    // MOVEMENT
+    // ============================================================
+
+    private void Move()
+    {
+        if (!canMove) return;
+        
+        Vector3 horizontal = Vector3.right * moveSpeed;
+        Vector3 newVel = new Vector3(horizontal.x, rb.velocity.y, horizontal.z);
+        rb.velocity = newVel;
     }
 
     private void CorrectBoardOrientation()
     {
-        Rigidbody rb = GetComponent<Rigidbody>();
         if (rb == null) return;
 
         Vector3 currentUp = transform.up;
@@ -204,6 +388,34 @@ public class PlayerController : MonoBehaviour
             rb.velocity = horizontalVelocity + Vector3.up * rb.velocity.y;
         }
     }
+
+    void Push()
+    {
+        if (!canPush) return;
+
+        if (pushCount >= maxPushes)
+        {
+            StartCoroutine(PushCooldown(pushCooldown));
+            return;
+        }
+
+        if (staminaSystem != null)
+        {
+            staminaSystem.OnPush();
+        }
+
+        pushCount++;
+        targetSpeed = Mathf.Min(targetSpeed + pushForce, maxMoveSpeed);
+
+        if (currentPushRoutine != null)
+            StopCoroutine(currentPushRoutine);
+
+        currentPushRoutine = StartCoroutine(SmoothPush());
+    }
+
+    // ============================================================
+    // INPUT HANDLING
+    // ============================================================
 
     void HandleInput()
     {
@@ -237,12 +449,12 @@ public class PlayerController : MonoBehaviour
             {
                 if (y > 0)
                 {
-                    if (isGrounded) Ollie();
+                    if (isGrounded || isGrinding) Ollie();
                     else Backflip();
                 }
                 else
                 {
-                    if (!isGrounded) Frontflip();
+                    if (!isGrounded && !isGrinding) Frontflip();
                 }
             }
             else
@@ -297,81 +509,9 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    void StartManual()
-    {
-        cam.SetIgnoreRotation(true);
-        if (isManual) return;
-
-        isManual = true;
-        canOllie = false;
-        manualFailTimer = 0f;
-        isHoldingManual = true;
-        manualTargetAngle = manualStartAngle;
-
-        StopAllCoroutines();
-        StartCoroutine(SmoothApplyManualTarget(manualStartAngle, 0.15f));
-
-        Debug.Log("Started Manual");
-    }
-
-    void EndManual(bool failed = false)
-    {
-        cam.SetIgnoreRotation(false);
-        if (!isManual) return;
-
-        isManual = false;
-        canOllie = true;
-        isHoldingManual = false;
-        manualTargetAngle = 0f;
-        manualFailTimer = 0f;
-
-        StopAllCoroutines();
-        StartCoroutine(SmoothApplyManualTarget(0f, 0.2f));
-
-        if (failed)
-        {
-            Debug.Log("Manual Failed - Lost Balance!");
-        }
-        else
-        {
-            Debug.Log("Manual Ended");
-        }
-    }
-
-    IEnumerator SmoothApplyManualTarget(float targetAngle, float duration)
-    {
-        float startAngle;
-        if (boardVisual != null)
-            startAngle = QuaternionToPitch(boardVisual.localRotation, boardVisualBaseLocalRot);
-        else
-            startAngle = QuaternionToPitch(transform.localRotation, baseLocalRot);
-        float elapsed = 0f;
-        while (elapsed < duration)
-        {
-            elapsed += Time.deltaTime;
-            float angle = Mathf.Lerp(startAngle, targetAngle, elapsed / duration);
-            ApplyManualRotation(angle);
-            yield return null;
-        }
-        ApplyManualRotation(targetAngle);
-    }
-
-    void ApplyManualRotation(float pitchDegrees)
-    {
-        if (boardVisual != null)
-            boardVisual.localRotation = boardVisualBaseLocalRot * Quaternion.Euler(pitchDegrees, 0f, 0f);
-        else
-            transform.localRotation = baseLocalRot * Quaternion.Euler(pitchDegrees, 0f, 0f);
-    }
-
-    float QuaternionToPitch(Quaternion currentLocal, Quaternion baseLocal)
-    {
-        Quaternion relative = Quaternion.Inverse(baseLocal) * currentLocal;
-        Vector3 euler = relative.eulerAngles;
-        float pitch = euler.x;
-        if (pitch > 180f) pitch -= 360f;
-        return pitch;
-    }
+    // ============================================================
+    // MANUAL SYSTEM
+    // ============================================================
 
     void HandleManualInput()
     {
@@ -457,119 +597,65 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    private bool DeterminePerfectLanding()
+    void StartManual()
     {
-        // Check board angle relative to ground
-        float angle = Vector3.Angle(transform.up, Vector3.up);
-        
-        // Check landing velocity
-        float landingSpeed = Mathf.Abs(rb.velocity.y);
-        
-        // Perfect landing = upright and low impact
-        bool perfect = angle < 15f && landingSpeed < 8f;
-        
-        if (perfect)
-        {
-            Debug.Log("✨ PERFECT LANDING!");
-        }
-        
-        return perfect;
+        if (cam != null) cam.SetIgnoreRotation(true);
+        if (isManual) return;
+
+        isManual = true;
+        canOllie = false;
+        manualFailTimer = 0f;
+        isHoldingManual = true;
+        manualTargetAngle = manualStartAngle;
+
+        StopAllCoroutines();
+        StartCoroutine(SmoothApplyManualTarget(manualStartAngle, 0.15f));
+
+        Debug.Log("Started Manual");
     }
 
-
-    private void Grounded()
+    void EndManual(bool failed = false)
     {
-        Vector3 rayOrigin = transform.position;
-        RaycastHit hit;
+        if (cam != null) cam.SetIgnoreRotation(false);
+        if (!isManual) return;
 
-        bool wasGrounded = isGrounded;
+        isManual = false;
+        canOllie = true;
+        isHoldingManual = false;
+        manualTargetAngle = 0f;
+        manualFailTimer = 0f;
 
-        if (staminaSystem != null)
-        {
-            staminaSystem.SetGrounded(isGrounded);
-        }
+        StopAllCoroutines();
+        StartCoroutine(SmoothApplyManualTarget(0f, 0.2f));
 
-        if (Physics.Raycast(rayOrigin, Vector3.down, out hit, raycastDistance, groundLayer))
-        {
-            isGrounded = true;
+        Debug.Log(failed ? "Manual Failed - Lost Balance!" : "Manual Ended");
+    }
 
-            if (!wasGrounded)
-            {
-                lastGroundedTime = Time.time;
-                Rigidbody rb = GetComponent<Rigidbody>();
-                if (rb != null)
-                {
-                    rb.velocity = new Vector3(rb.velocity.x, rb.velocity.y * 0.5f, rb.velocity.z);
-                    Vector3 groundNormal = hit.normal;
-                    Quaternion landingRotation = Quaternion.FromToRotation(transform.up, groundNormal) * transform.rotation;
-                    transform.rotation = Quaternion.Slerp(transform.rotation, landingRotation, 0.5f);
-                }
-
-                // FINALIZE COMBO ON LANDING
-                if (scoreSystem != null)
-                {
-                    // Determine if landing was perfect
-                    bool perfectLanding = DeterminePerfectLanding();
-                    scoreSystem.FinalizeCombo(perfectLanding);
-                }
-                else if (currentCombo > 0)
-                {
-                    // Fallback for regular score system
-                    FinalizeCombo();
-                }
-            }
-
-            StartCoroutine(RealignVisualOnLand(0.25f));
-            if (cam != null) cam.SetIgnoreRotation(false);
-        }
+    void ApplyManualRotation(float pitchDegrees)
+    {
+        if (boardVisual != null)
+            boardVisual.localRotation = boardVisualBaseLocalRot * Quaternion.Euler(pitchDegrees, 0f, 0f);
         else
-        {
-            isGrounded = false;
-        }
-
-        if (Physics.Raycast(rayOrigin, Vector3.down, out hit, raycastDistance, grindLayer))
-        {
-            if (!isGrinding) StartCoroutine(StartGrind(hit));
-        }
+            transform.localRotation = baseLocalRot * Quaternion.Euler(pitchDegrees, 0f, 0f);
     }
 
-    private void Move()
+    float QuaternionToPitch(Quaternion currentLocal, Quaternion baseLocal)
     {
-        if (!canMove) return;
-        Vector3 horizontal = Vector3.right * moveSpeed;
-        Vector3 newVel = new Vector3(horizontal.x, rb.velocity.y, horizontal.z);
-        rb.velocity = newVel;
+        Quaternion relative = Quaternion.Inverse(baseLocal) * currentLocal;
+        Vector3 euler = relative.eulerAngles;
+        float pitch = euler.x;
+        if (pitch > 180f) pitch -= 360f;
+        return pitch;
     }
 
-    void Push()
-    {
-        if (!canPush) return;
-
-        if (pushCount >= maxPushes)
-        {
-            StartCoroutine(PushCooldown(pushCooldown));
-            return;
-        }
-
-        if (staminaSystem != null)
-        {
-            staminaSystem.OnPush();
-        }
-
-        pushCount++;
-        targetSpeed = Mathf.Min(targetSpeed + pushForce, maxMoveSpeed);
-
-        if (currentPushRoutine != null)
-            StopCoroutine(currentPushRoutine);
-
-        currentPushRoutine = StartCoroutine(SmoothPush());
-    }
+    // ============================================================
+    // TRICKS
+    // ============================================================
 
     void Ollie()
     {
-        if (!canOllie || !isGrounded) return;
+        if (!canOllie || (!isGrounded && !isGrinding)) return;
         
-        // CHECK STAMINA BEFORE PERFORMING TRICK
         if (staminaSystem != null && !staminaSystem.HasEnoughStamina(staminaSystem.jumpCost))
         {
             Debug.Log("Not enough stamina to Ollie!");
@@ -581,21 +667,28 @@ public class PlayerController : MonoBehaviour
             staminaSystem.OnJump();
         }
 
-        rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
+        float finalJumpForce = jumpForce;
+        if (isGrinding)
+        {
+            EndGrind();
+            finalJumpForce *= grindJumpOffForce;
+        }
+
+        rb.AddForce(Vector3.up * finalJumpForce, ForceMode.Impulse);
         Debug.Log("Ollie!");
     }
 
     void Kickflip()
     {
-        // CHECK STAMINA BEFORE PERFORMING TRICK
         if (staminaSystem != null && !staminaSystem.HasEnoughStamina(staminaSystem.basicTrickCost))
         {
             Debug.Log("Not enough stamina for Kickflip!");
             return;
         }
         
-        if (isGrounded)
+        if (isGrounded || isGrinding)
         {
+            if (isGrinding) EndGrind();
             rb.AddForce(Vector3.up * jumpForce * 0.6f, ForceMode.Impulse);
         }
 
@@ -611,15 +704,15 @@ public class PlayerController : MonoBehaviour
 
     void Heelflip()
     {
-        // CHECK STAMINA BEFORE PERFORMING TRICK
         if (staminaSystem != null && !staminaSystem.HasEnoughStamina(staminaSystem.basicTrickCost))
         {
             Debug.Log("Not enough stamina for Heelflip!");
             return;
         }
         
-        if (isGrounded)
+        if (isGrounded || isGrinding)
         {
+            if (isGrinding) EndGrind();
             rb.AddForce(Vector3.up * jumpForce * 0.6f, ForceMode.Impulse);
         }
 
@@ -635,7 +728,6 @@ public class PlayerController : MonoBehaviour
 
     void Backflip()
     {
-        // CHECK STAMINA BEFORE PERFORMING TRICK
         if (staminaSystem != null && !staminaSystem.HasEnoughStamina(staminaSystem.complexTrickCost))
         {
             Debug.Log("Not enough stamina for Backflip!");
@@ -654,7 +746,6 @@ public class PlayerController : MonoBehaviour
 
     void Frontflip()
     {
-        // CHECK STAMINA BEFORE PERFORMING TRICK
         if (staminaSystem != null && !staminaSystem.HasEnoughStamina(staminaSystem.complexTrickCost))
         {
             Debug.Log("Not enough stamina for Frontflip!");
@@ -673,21 +764,20 @@ public class PlayerController : MonoBehaviour
 
     void PopShoveIt()
     {
-        // CHECK STAMINA BEFORE PERFORMING TRICK
         if (staminaSystem != null && !staminaSystem.HasEnoughStamina(staminaSystem.basicTrickCost))
         {
             Debug.Log("Not enough stamina for Pop Shove-It!");
             return;
         }
         
-        if (isGrounded)
+        if (isGrounded || isGrinding)
         {
+            if (isGrinding) EndGrind();
             rb.AddForce(Vector3.up * jumpForce * 0.6f, ForceMode.Impulse);
         }
 
         Debug.Log("Pop Shove-It!");
         
-        // CONSUME STAMINA
         if (staminaSystem != null)
         {
             staminaSystem.OnTrickStart(false);
@@ -699,29 +789,26 @@ public class PlayerController : MonoBehaviour
             cam.TriggerCameraShake();
         }
         
-        // ADD TO COMBO AND SCORE
         AddToCombo("Pop Shove-It", 1);
-        
         StartCoroutine(VisualSpinRoutine(180, "Pop Shove-It"));
     }
 
     void TreFlip()
     {
-        // CHECK STAMINA BEFORE PERFORMING TRICK
         if (staminaSystem != null && !staminaSystem.HasEnoughStamina(staminaSystem.complexTrickCost))
         {
             Debug.Log("Not enough stamina for Tre Flip!");
             return;
         }
         
-        if (isGrounded)
+        if (isGrounded || isGrinding)
         {
+            if (isGrinding) EndGrind();
             rb.AddForce(Vector3.up * jumpForce * 0.6f, ForceMode.Impulse);
         }
 
         Debug.Log("360 Flip (Tre Flip)!");
         
-        // CONSUME STAMINA
         if (staminaSystem != null)
         {
             staminaSystem.OnTrickStart(true);
@@ -733,52 +820,124 @@ public class PlayerController : MonoBehaviour
             cam.TriggerCameraShake();
         }
         
-        // ADD TO COMBO AND SCORE
         AddToCombo("Tre Flip", 1);
-        
         StartCoroutine(VisualSpinRoutine(360, "Tre Flip"));
     }
 
-    void FiftyFiftyGrind()
+    private void StartFlip(string trickName, Vector3 axis, bool isXAxisRotation = false, int flips = 1)
     {
-        Debug.Log("50-50 Grind!");
-        StartCoroutine(GrindRoutine());
-    }
-
-    void Boardslide()
-    {
-        Debug.Log("Boardslide!");
-        StartCoroutine(GrindRoutine());
-    }
-
-    void FiveOGrind()
-    {
-        Debug.Log("5-0 Grind!");
-        StartCoroutine(GrindRoutine());
-    }
-
-    IEnumerator StartGrind(RaycastHit hit)
-    {
-        isGrinding = true;
-        Debug.Log("Started Grind!");
-        
         if (staminaSystem != null)
         {
-            staminaSystem.OnGrindStart();
+            bool isComplexTrick = flips > 1 || trickName.Contains("Tre") || isXAxisRotation;
+            staminaSystem.OnTrickStart(isComplexTrick);
+        }
+
+        if (isGrounded || isGrinding)
+        {
+            if (isGrinding) EndGrind();
+            rb.AddForce(Vector3.up * jumpForce * (0.8f + (flips * 0.2f)), ForceMode.Impulse);
+        }
+
+        string multipleTrickName = flips > 1 ? $"{flips}x {trickName}" : trickName;
+        Debug.Log($"{multipleTrickName}!");
+
+        if (cam != null)
+        {
+            cam.SetIgnoreRotation(true);
+            cam.TriggerCameraShake();
         }
         
-        rb.useGravity = false;
-        rb.velocity = hit.collider.transform.forward * moveSpeed;
+        StartCoroutine(VisualFlipRoutine(axis, multipleTrickName, isXAxisRotation, flips));
+        AddToCombo(trickName, flips);
+    }
 
-        yield return new WaitForSeconds(2f);
+    // ============================================================
+    // COMBO & SCORING
+    // ============================================================
 
-        rb.useGravity = true;
-        isGrinding = false;
-        if (staminaSystem != null)
+    private void AddToCombo(string trickName, int multiplier = 1)
+    {
+        float currentTime = Time.time;
+        
+        if (currentTime - lastTrickTime <= comboTimeWindow)
         {
-            staminaSystem.OnGrindEnd();
+            if (trickName != lastTrickName)
+            {
+                currentCombo++;
+                comboMultiplier = 1f + (currentCombo * 0.5f);
+            }
         }
-        Debug.Log("End Grind!");
+        else
+        {
+            currentCombo = 1;
+            comboMultiplier = 1f;
+        }
+
+        if (trickScores.TryGetValue(trickName, out int baseScore))
+        {
+            int scoreAdd = Mathf.RoundToInt(baseScore * comboMultiplier * multiplier);
+            AddScoreToSystem(scoreAdd);
+            
+            Debug.Log($"{trickName} x{multiplier} (Combo x{comboMultiplier:F1}) = +{scoreAdd} points!");
+            
+            if (UIManager.Instance != null)
+            {
+                Vector3 textPosition = transform.position + Vector3.up * 1.5f;
+                UIManager.Instance.SpawnTrickText(trickName, textPosition, multiplier, comboMultiplier);
+            }
+        }
+        else
+        {
+            Debug.LogWarning($"No score defined for trick: {trickName}");
+            int defaultScore = 100;
+            int scoreAdd = Mathf.RoundToInt(defaultScore * comboMultiplier * multiplier);
+            AddScoreToSystem(scoreAdd);
+        }
+
+        lastTrickName = trickName;
+        lastTrickTime = currentTime;
+    }
+
+    private void FinalizeCombo()
+    {
+        if (currentCombo > 1)
+        {
+            Debug.Log($"Combo Complete! {currentCombo} tricks - Final Multiplier: x{comboMultiplier:F1}");
+        }
+        currentCombo = 0;
+        comboMultiplier = 1f;
+        lastTrickName = "";
+    }
+
+    private void AddScoreToSystem(int points)
+    {
+        if (scoreSystem != null)
+        {
+            scoreSystem.AddScore(points);
+        }
+    }
+
+    // ============================================================
+    // COROUTINES
+    // ============================================================
+
+    IEnumerator SmoothApplyManualTarget(float targetAngle, float duration)
+    {
+        float startAngle;
+        if (boardVisual != null)
+            startAngle = QuaternionToPitch(boardVisual.localRotation, boardVisualBaseLocalRot);
+        else
+            startAngle = QuaternionToPitch(transform.localRotation, baseLocalRot);
+        
+        float elapsed = 0f;
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float angle = Mathf.Lerp(startAngle, targetAngle, elapsed / duration);
+            ApplyManualRotation(angle);
+            yield return null;
+        }
+        ApplyManualRotation(targetAngle);
     }
 
     IEnumerator VisualFlipRoutine(Vector3 axis, string trickName, bool isXAxisRotation = false, int flips = 1)
@@ -789,14 +948,12 @@ public class PlayerController : MonoBehaviour
         }
 
         float duration = 0.5f * flips;
-        float elapsed = 0f;
         float totalRotation = 0f;
         float targetRotation = 360f * flips;
         float currentRotationSpeed = rotationSpeed * (flips > 1 ? 1.5f : 1f);
 
         while (totalRotation < targetRotation)
         {
-            elapsed += Time.deltaTime;
             float delta = currentRotationSpeed * Time.deltaTime;
             totalRotation += delta;
 
@@ -850,13 +1007,6 @@ public class PlayerController : MonoBehaviour
         Debug.Log($"{trickName} visual finished");
     }
 
-    IEnumerator GrindRoutine()
-    {
-        rb.useGravity = false;
-        yield return new WaitForSeconds(1.5f);
-        rb.useGravity = true;
-    }
-
     IEnumerator RealignVisualOnLand(float duration)
     {
         if (boardVisual == null) yield break;
@@ -899,122 +1049,10 @@ public class PlayerController : MonoBehaviour
         moveSpeed = targetSpeed;
     }
 
-    private void AddToCombo(string trickName, int multiplier = 1)
-    {
-        float currentTime = Time.time;
-        
-        if (currentTime - lastTrickTime <= comboTimeWindow)
-        {
-            if (trickName != lastTrickName)
-            {
-                currentCombo++;
-                comboMultiplier = 1f + (currentCombo * 0.5f);
-            }
-        }
-        else
-        {
-            currentCombo = 1;
-            comboMultiplier = 1f;
-        }
+    // ============================================================
+    // PUBLIC METHODS
+    // ============================================================
 
-        if (trickScores.TryGetValue(trickName, out int baseScore))
-        {
-            int scoreAdd = Mathf.RoundToInt(baseScore * comboMultiplier * multiplier);
-            AddScoreToSystem(scoreAdd);
-            
-            Debug.Log($"{trickName} x{multiplier} (Combo x{comboMultiplier:F1}) = +{scoreAdd} points!");
-            
-            if (UIManager.Instance != null)
-            {
-                Vector3 textPosition = transform.position + Vector3.up * 1.5f;
-                UIManager.Instance.SpawnTrickText(trickName, textPosition, multiplier, comboMultiplier);
-            }
-        }
-        else
-        {
-            Debug.LogWarning($"No score defined for trick: {trickName}");
-            int defaultScore = 100;
-            int scoreAdd = Mathf.RoundToInt(defaultScore * comboMultiplier * multiplier);
-            AddScoreToSystem(scoreAdd);
-            
-            if (UIManager.Instance != null)
-            {
-                Vector3 textPosition = transform.position + Vector3.up * 1.5f;
-                UIManager.Instance.SpawnTrickText(trickName, textPosition, multiplier, comboMultiplier);
-            }
-        }
-
-        lastTrickName = trickName;
-        lastTrickTime = currentTime;
-    }
-
-    private void FinalizeCombo()
-    {
-        if (currentCombo > 1)
-        {
-            Debug.Log($"Combo Complete! {currentCombo} tricks - Final Multiplier: x{comboMultiplier:F1}");
-        }
-        currentCombo = 0;
-        comboMultiplier = 1f;
-        lastTrickName = "";
-    }
-
-    private void StartFlip(string trickName, Vector3 axis, bool isXAxisRotation = false, int flips = 1)
-    {
-        if (staminaSystem != null)
-        {
-            bool isComplexTrick = flips > 1 || trickName.Contains("Tre") || isXAxisRotation;
-            staminaSystem.OnTrickStart(isComplexTrick);
-        }
-
-        if (isGrounded)
-        {
-            rb.AddForce(Vector3.up * jumpForce * (0.8f + (flips * 0.2f)), ForceMode.Impulse);
-        }
-
-        string multipleTrickName = flips > 1 ? $"{flips}x {trickName}" : trickName;
-        Debug.Log($"{multipleTrickName}!");
-
-        if (cam != null)
-        {
-            cam.SetIgnoreRotation(true);
-            cam.TriggerCameraShake();
-        }
-        StartCoroutine(VisualFlipRoutine(axis, multipleTrickName, isXAxisRotation, flips));
-
-        AddToCombo(trickName, flips);
-    }
-    
-    // HELPER METHOD TO ADD SCORE TO SCORE SYSTEM
-    private void AddScoreToSystem(int points)
-    {
-        Debug.Log($"PlayerController: Attempting to add {points} points to score system");
-        
-        if (scoreSystem != null)
-        {
-            scoreSystem.AddScore(points);
-            Debug.Log($"PlayerController: Score added successfully. Current score: {scoreSystem.GetCurrentScore()}");
-        }
-        else
-        {
-            Debug.LogError("PlayerController: scoreSystem is NULL!");
-        }
-        
-        // Update UI - This might be redundant since ScoreSystem.AddScore already does this
-        // But keeping it as a safety net
-        if (UIManager.Instance != null)
-        {
-            int currentScore = scoreSystem != null ? scoreSystem.GetCurrentScore() : 0;
-            UIManager.Instance.UpdateScore(currentScore);
-            Debug.Log($"PlayerController: UI updated with score: {currentScore}");
-        }
-        else
-        {
-            Debug.LogError("PlayerController: UIManager.Instance is NULL!");
-        }
-    }
-
-    
     public void ResetForNewLevel() 
     {
         ResetState();
