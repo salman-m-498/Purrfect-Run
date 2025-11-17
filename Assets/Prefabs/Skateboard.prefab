@@ -11,7 +11,7 @@ GameObject:
   - component: {fileID: 1584564798970897946}
   - component: {fileID: 9049552008656015854}
   - component: {fileID: 960227689475543352}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: Capsule
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -94,7 +94,7 @@ GameObject:
   - component: {fileID: 4075184412380956249}
   - component: {fileID: 5914571356111285341}
   - component: {fileID: 1214127968026145144}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: Capsule (1)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -177,7 +177,7 @@ GameObject:
   - component: {fileID: 1979659833906942791}
   - component: {fileID: 4272271662830050796}
   - component: {fileID: 5515172526053166348}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: Capsule (2)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -258,7 +258,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1420072085141632140}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: Mesh
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -273,7 +273,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 3806138796204867939}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalRotation: {x: 0, y: 0.7071068, z: 0, w: 0.7071068}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
@@ -285,7 +285,7 @@ Transform:
   - {fileID: 8228607301129538841}
   - {fileID: 7015179476030686905}
   m_Father: {fileID: 9062481279587191150}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 90, z: 0}
 --- !u!1 &4241857311057203233
 GameObject:
   m_ObjectHideFlags: 0
@@ -298,7 +298,7 @@ GameObject:
   - component: {fileID: 8049727133597942178}
   - component: {fileID: 2637998516850192840}
   - component: {fileID: 9130866510753522707}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: Cube
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -348,7 +348,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: b27a6696fcda786489dbed6f7dd11d73, type: 2}
+  - {fileID: 2100000, guid: 24e795a673f9fde4180dafa1e24bf221, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -402,7 +402,7 @@ GameObject:
   - component: {fileID: 9062481279587191150}
   - component: {fileID: 8444483506234204296}
   - component: {fileID: 5337642299893041713}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: Skateboard
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -444,13 +444,13 @@ Rigidbody:
     m_Bits: 0
   m_ExcludeLayers:
     serializedVersion: 2
-    m_Bits: 0
+    m_Bits: 256
   m_ImplicitCom: 1
   m_ImplicitTensor: 1
   m_UseGravity: 1
   m_IsKinematic: 0
   m_Interpolate: 1
-  m_Constraints: 0
+  m_Constraints: 16
   m_CollisionDetection: 0
 --- !u!114 &5337642299893041713
 MonoBehaviour:
@@ -464,32 +464,45 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7fab9643ec5bd294fa12202402b669f7, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  moveSpeed: 1
+  moveSpeed: 10
   maxMoveSpeed: 50
   pushForce: 1
   pushSmoothTime: 0.5
   pushCooldown: 5
-  jumpForce: 10
+  jumpForce: 6
   swipeThreshold: 50
   trickForce: 5
   rotationSpeed: 360
   isManual: 0
   manualTiltSpeed: 80
   manualStartAngle: 10
-  maxManualAngle: 25
+  maxManualAngle: 45
   manualSafeRange: 15
   manualReturnSpeed: 5
   manualFailTime: 0.5
+  grindJumpOffForce: 1.5
+  grindDetectionRadius: 0.3
   boardVisual: {fileID: 1420072085141632140}
+  characterCollider: {fileID: 5417706270973837572}
+  uprightTorque: 100
+  stabilizationDamping: 15
+  maxCorrectionAngle: 45
+  resetOrientationKey: 114
+  manualResetCooldown: 1
+  extremeCorrectionSpeed: 20
+  normalCorrectionSpeed: 12
+  minCorrectionAngle: 5
+  instantCorrectionThreshold: 0.1
+  usePhysicsCorrection: 1
+  useDirectCorrection: 1
   isGrounded: 0
   canMove: 1
   canPush: 1
   canOllie: 1
-  isGrinding: 0
+  isGrinding: 1
   currentCombo: 0
   comboMultiplier: 1
   comboTimeWindow: 1.5
-  totalScore: 0
   groundLayer:
     serializedVersion: 2
     m_Bits: 64
@@ -497,7 +510,7 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 128
   raycastDistance: 0.2
-  maxPushes: 5
+  maxPushes: 8
 --- !u!1 &8108493159708465360
 GameObject:
   m_ObjectHideFlags: 0
@@ -509,7 +522,7 @@ GameObject:
   - component: {fileID: 8228607301129538841}
   - component: {fileID: 392112952691443137}
   - component: {fileID: 6114188781867647498}
-  m_Layer: 0
+  m_Layer: 8
   m_Name: Capsule (3)
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -682,16 +695,49 @@ PrefabInstance:
       value: OiiaioooooiaiFin
       objectReference: {fileID: 0}
     - target: {fileID: 919132149155446097, guid: 4763bdc4a4f4aeb47afca39ecac84012, type: 3}
+      propertyPath: m_Layer
+      value: 8
+      objectReference: {fileID: 0}
+    - target: {fileID: 919132149155446097, guid: 4763bdc4a4f4aeb47afca39ecac84012, type: 3}
       propertyPath: m_IsActive
       value: 1
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
-    m_AddedComponents: []
+    m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: 4763bdc4a4f4aeb47afca39ecac84012, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 5417706270973837572}
   m_SourcePrefab: {fileID: 100100000, guid: 4763bdc4a4f4aeb47afca39ecac84012, type: 3}
 --- !u!4 &7015179476030686905 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: 4763bdc4a4f4aeb47afca39ecac84012, type: 3}
   m_PrefabInstance: {fileID: 7408515866621829458}
   m_PrefabAsset: {fileID: 0}
+--- !u!1 &7642956272544504835 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 919132149155446097, guid: 4763bdc4a4f4aeb47afca39ecac84012, type: 3}
+  m_PrefabInstance: {fileID: 7408515866621829458}
+  m_PrefabAsset: {fileID: 0}
+--- !u!65 &5417706270973837572
+BoxCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7642956272544504835}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 1
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Size: {x: 0.2725487, y: 0.39512157, z: 0.7241811}
+  m_Center: {x: 0.006067383, y: 0.18654984, z: -0.083894975}

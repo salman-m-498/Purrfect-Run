@@ -33,6 +33,27 @@ public class PlayerController : MonoBehaviour
     
     [Header("References")]
     public Transform boardVisual;
+    public Collider characterCollider; // NEW: Reference to character collider
+
+    [Header("Stabilization Settings")] // NEW SECTION
+    public float uprightTorque = 50f;
+    public float stabilizationDamping = 5f;
+    public float maxCorrectionAngle = 45f; // How far off before aggressive correction
+    public KeyCode resetOrientationKey = KeyCode.R; // Key to manually reset orientation
+    public float manualResetCooldown = 1f; // Cooldown between manual resets
+    
+    // Advanced correction settings
+    [Header("Advanced Correction")]
+    public float extremeCorrectionSpeed = 15f; // Speed for extreme angles
+    public float normalCorrectionSpeed = 8f; // Speed for normal angles
+    public float minCorrectionAngle = 5f; // Start correcting at this angle
+    public float instantCorrectionThreshold = 0.1f; // Snap to upright if this close
+    public bool usePhysicsCorrection = true; // Use torque-based correction
+    public bool useDirectCorrection = true; // Use rotation-based correction
+    
+    private float lastManualResetTime = -999f;
+    private bool hasShownFlipHint = false;
+    private bool isCorrectingOrientation = false;
 
     [Header("State")]
     public bool isGrounded;
@@ -78,6 +99,7 @@ public class PlayerController : MonoBehaviour
     private DollyCam cam;
     private GameManager gameManager;
     private StaminaSystem staminaSystem;
+    private HealthSystem healthSystem;
     private ScoreSystem scoreSystem;
 
     private readonly Dictionary<string, int> trickScores = new Dictionary<string, int>()
@@ -102,11 +124,17 @@ public class PlayerController : MonoBehaviour
         gameManager = manager;
         cam = manager.cam;
         staminaSystem = manager.staminaSystem;
+        healthSystem = manager.healthSystem;
         scoreSystem = manager.scoreSystem;
         
         if (staminaSystem == null)
         {
             Debug.LogError("StaminaSystem not found in GameManager!");
+        }
+        
+        if (healthSystem == null)
+        {
+            Debug.LogError("HealthSystem not found in GameManager!");
         }
         
         if (scoreSystem == null)
@@ -128,12 +156,18 @@ public class PlayerController : MonoBehaviour
             boardVisualBaseLocalRot = baseLocalRot;
         }
 
+        // NEW: Disable character collider during tricks
+        if (characterCollider != null)
+        {
+            Debug.Log("Character collider found and will be managed during tricks");
+        }
+
         ResetState();
     }
 
     public void ResetState()
     {
-        moveSpeed = 0f;
+        moveSpeed = 5f;
         targetSpeed = 0f;
         currentCombo = 0;
         comboMultiplier = 1f;
@@ -152,6 +186,12 @@ public class PlayerController : MonoBehaviour
         if (boardVisual != null)
         {
             boardVisual.localRotation = boardVisualBaseLocalRot;
+        }
+
+        // NEW: Ensure character collider is enabled when grounded
+        if (characterCollider != null)
+        {
+            characterCollider.enabled = true;
         }
     }
 
@@ -179,7 +219,27 @@ public class PlayerController : MonoBehaviour
         {
             boardVisualBaseLocalRot = baseLocalRot;
         }
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+        // Ensure WebGL canvas captures input properly
+        Debug.Log("WebGL build detected - Input system initialized");
+        
+        // Log input test
+        StartCoroutine(TestWebGLInput());
+#endif
     }
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+    private IEnumerator TestWebGLInput()
+    {
+        yield return new WaitForSeconds(2f);
+        Debug.Log("=== WebGL Input Test ===");
+        Debug.Log($"Mouse Position: {Input.mousePosition}");
+        Debug.Log($"Touch Supported: {Input.touchSupported}");
+        Debug.Log($"Touch Count: {Input.touchCount}");
+        Debug.Log("Try clicking/touching the screen...");
+    }
+#endif
 
     // ============================================================
     // UPDATE LOOPS
@@ -191,13 +251,23 @@ public class PlayerController : MonoBehaviour
         HandleManualInput();
         Grounded();
         CheckGrindStatus();
+        
+        // NEW: Manage character collider based on state
+        ManageCharacterCollider();
+        
+        // NEW: Handle manual reset input
+        HandleManualReset();
+        
+        // NEW: Check for extreme angles and show hint
+        CheckExtremeAngleHint();
     }
 
     private void FixedUpdate()
     {
         Move();
         
-        if (isGrounded && !isGrinding)
+        // IMPROVED: Always try to correct when grounded (not just when not grinding)
+        if (isGrounded && !isManual) // Don't interfere with manual tricks
         {
             CorrectBoardOrientation();
         }
@@ -206,6 +276,162 @@ public class PlayerController : MonoBehaviour
         if (isGrinding)
         {
             ScoreGrindPoints();
+        }
+    }
+
+    // ============================================================
+    // NEW: CHARACTER COLLIDER MANAGEMENT
+    // ============================================================
+
+    private void ManageCharacterCollider()
+    {
+        if (characterCollider == null) return;
+
+        // Disable character collider when airborne or doing tricks
+        // This prevents the character model from interfering with physics
+        if (!isGrounded || isGrinding)
+        {
+            characterCollider.enabled = false;
+        }
+        else
+        {
+            // Re-enable when safely grounded and upright
+            float uprightDot = Vector3.Dot(transform.up, Vector3.up);
+            if (uprightDot > 0.9f) // Only enable when mostly upright
+            {
+                characterCollider.enabled = true;
+            }
+        }
+    }
+
+    // ============================================================
+    // NEW: MANUAL RESET & HINT SYSTEM
+    // ============================================================
+
+    private void HandleManualReset()
+    {
+        // Check if player pressed reset key (works on keyboard)
+        bool resetPressed = Input.GetKeyDown(resetOrientationKey);
+        
+#if UNITY_WEBGL && !UNITY_EDITOR
+        // WebGL fallback - also allow double-tap to reset (mobile-friendly)
+        if (Input.GetMouseButtonDown(1)) // Right click on desktop
+        {
+            resetPressed = true;
+            Debug.Log("WebGL: Right-click reset detected");
+        }
+#endif
+        
+        if (resetPressed)
+        {
+            // Check cooldown
+            if (Time.time - lastManualResetTime >= manualResetCooldown)
+            {
+                ManualResetOrientation();
+            }
+            else
+            {
+                float remainingCooldown = manualResetCooldown - (Time.time - lastManualResetTime);
+                Debug.Log($"Reset on cooldown! Wait {remainingCooldown:F1}s");
+            }
+        }
+    }
+
+    private void ManualResetOrientation()
+    {
+        lastManualResetTime = Time.time;
+        hasShownFlipHint = false; // Reset hint flag
+        
+        Debug.Log("🔄 Manual Orientation Reset!");
+        
+        // Instantly correct to upright
+        Vector3 currentForward = transform.forward;
+        currentForward.y = 0; // Keep horizontal direction
+        if (currentForward.sqrMagnitude > 0.01f)
+        {
+            transform.rotation = Quaternion.LookRotation(currentForward.normalized, Vector3.up);
+        }
+        else
+        {
+            // Fallback if we have no horizontal direction
+            transform.rotation = Quaternion.identity;
+        }
+        
+        // Kill all angular velocity
+        if (rb != null)
+        {
+            rb.angularVelocity = Vector3.zero;
+            
+            // Keep horizontal velocity, reduce vertical bounce
+            Vector3 horizontalVel = new Vector3(rb.velocity.x, 0, rb.velocity.z);
+            rb.velocity = horizontalVel + Vector3.up * Mathf.Min(rb.velocity.y, 0);
+        }
+        
+        // Reset visual board if exists
+        if (boardVisual != null)
+        {
+            boardVisual.localRotation = boardVisualBaseLocalRot;
+        }
+        
+        // Optional: Show UI feedback
+        if (UIManager.Instance != null)
+        {
+            // DRAFT: Show reset confirmation
+            // UIManager.Instance.ShowHintText("Board Reset!", 1f);
+        }
+        
+        Debug.Log("✅ Orientation corrected to upright");
+    }
+
+    private void CheckExtremeAngleHint()
+    {
+        // Only check when grounded
+        if (!isGrounded) 
+        {
+            hasShownFlipHint = false; // Reset when airborne
+            return;
+        }
+        
+        // Skip if we're in a manual (intentional tilt)
+        if (isManual) return;
+        
+        // Calculate how upside-down we are
+        Vector3 currentUp = transform.up;
+        float upDot = Vector3.Dot(currentUp, Vector3.up);
+        float angleFromUpright = Mathf.Acos(Mathf.Clamp(upDot, -1f, 1f)) * Mathf.Rad2Deg;
+        
+        // If we're extremely tilted (>60 degrees) and haven't shown hint yet
+        if (angleFromUpright > 60f && !hasShownFlipHint)
+        {
+            hasShownFlipHint = true;
+            ShowFlipBoardHint();
+            Debug.Log($"⚠️ Extreme angle detected: {angleFromUpright:F1}° from upright");
+        }
+    }
+
+    private void ShowFlipBoardHint()
+    {
+        // DRAFT IMPLEMENTATION - To be connected to your UIManager
+        if (UIManager.Instance != null)
+        {
+            // TODO: Implement these methods in UIManager
+            
+            // Option 1: Simple text hint
+            // UIManager.Instance.ShowHintText($"Press [{resetOrientationKey}] to flip board upright", 3f);
+            
+            // Option 2: Animated hint with icon
+            // UIManager.Instance.ShowKeyPrompt(resetOrientationKey, "Flip Board", 3f);
+            
+            // Option 3: Tutorial-style popup
+            // UIManager.Instance.ShowTutorialHint("Board Flipped!", 
+            //     $"Press [{resetOrientationKey}] to reset orientation", 
+            //     TutorialHintType.Warning);
+            
+            Debug.Log($"[HINT WOULD SHOW]: Press {resetOrientationKey} to reset board orientation");
+        }
+        else
+        {
+            Debug.LogWarning("UIManager.Instance is null - cannot show flip hint");
         }
     }
 
@@ -300,6 +526,11 @@ public class PlayerController : MonoBehaviour
             staminaSystem.SetGrounded(isGrounded);
         }
 
+        if (healthSystem != null)
+        {
+            healthSystem.SetGrounded(isGrounded);
+        }
+
         // Ground check
         if (Physics.Raycast(rayOrigin, Vector3.down, out hit, raycastDistance, groundLayer))
         {
@@ -311,10 +542,54 @@ public class PlayerController : MonoBehaviour
                 
                 if (rb != null)
                 {
-                    rb.velocity = new Vector3(rb.velocity.x, rb.velocity.y * 0.5f, rb.velocity.z);
+                    // Reduce vertical velocity on landing
+                    rb.velocity = new Vector3(rb.velocity.x, rb.velocity.y * 0.3f, rb.velocity.z);
+                    
+                    // IMPROVED: Immediate orientation correction on landing
                     Vector3 groundNormal = hit.normal;
-                    Quaternion landingRotation = Quaternion.FromToRotation(transform.up, groundNormal) * transform.rotation;
-                    transform.rotation = Quaternion.Slerp(transform.rotation, landingRotation, 0.5f);
+                    Vector3 desiredUp = groundNormal;
+                    
+                    // If ground is relatively flat, force upright immediately
+                    if (Vector3.Dot(groundNormal, Vector3.up) > 0.8f)
+                    {
+                        desiredUp = Vector3.up;
+                        
+                        // Calculate current tilt
+                        float currentTilt = Vector3.Angle(transform.up, Vector3.up);
+                        
+                        // Force immediate correction for extreme angles
+                        if (currentTilt > 45f)
+                        {
+                            Debug.Log($"🔧 Landing correction: {currentTilt:F1}° tilt detected, forcing upright");
+                            
+                            // Keep forward direction but correct up vector
+                            Vector3 forward = Vector3.ProjectOnPlane(transform.forward, Vector3.up);
+                            if (forward.sqrMagnitude > 0.01f)
+                            {
+                                transform.rotation = Quaternion.LookRotation(forward.normalized, Vector3.up);
+                            }
+                            else
+                            {
+                                transform.rotation = Quaternion.LookRotation(Vector3.right, Vector3.up);
+                            }
+                            
+                            // Kill all rotation
+                            rb.angularVelocity = Vector3.zero;
+                        }
+                        else
+                        {
+                            // Smooth correction for smaller angles
+                            Quaternion landingRotation = Quaternion.FromToRotation(transform.up, desiredUp) * transform.rotation;
+                            transform.rotation = Quaternion.Slerp(transform.rotation, landingRotation, 0.8f);
+                            rb.angularVelocity *= 0.2f; // Heavily dampen spin
+                        }
+                    }
+                    else
+                    {
+                        // On slopes, align to surface normal
+                        Quaternion landingRotation = Quaternion.FromToRotation(transform.up, groundNormal) * transform.rotation;
+                        transform.rotation = Quaternion.Slerp(transform.rotation, landingRotation, 0.5f);
+                    }
                 }
 
                 // Finalize combo on landing
@@ -372,21 +647,137 @@ public class PlayerController : MonoBehaviour
         rb.velocity = newVel;
     }
 
+    // ============================================================
+    // IMPROVED BOARD ORIENTATION CORRECTION
+    // ============================================================
+
     private void CorrectBoardOrientation()
     {
         if (rb == null) return;
 
         Vector3 currentUp = transform.up;
-        float upDot = Vector3.Dot(currentUp, Vector3.up);
+        Vector3 targetUp = Vector3.up;
         
-        if (upDot < 0.95f)
+        // Calculate how far we are from upright (0 = upside down, 1 = perfect upright)
+        float upDot = Vector3.Dot(currentUp, targetUp);
+        float angleFromUpright = Mathf.Acos(Mathf.Clamp(upDot, -1f, 1f)) * Mathf.Rad2Deg;
+        
+        // If we're very close to upright, snap to perfect and stop
+        if (angleFromUpright < instantCorrectionThreshold)
         {
-            Quaternion targetRotation = Quaternion.FromToRotation(currentUp, Vector3.up) * transform.rotation;
-            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.fixedDeltaTime * 5f);
-            rb.angularVelocity = Vector3.zero;
-            Vector3 horizontalVelocity = new Vector3(rb.velocity.x, 0, rb.velocity.z);
-            rb.velocity = horizontalVelocity + Vector3.up * rb.velocity.y;
+            if (isCorrectingOrientation)
+            {
+                // Snap to perfect upright
+                Vector3 currentForward = Vector3.ProjectOnPlane(transform.forward, Vector3.up).normalized;
+                if (currentForward.sqrMagnitude > 0.01f)
+                {
+                    transform.rotation = Quaternion.LookRotation(currentForward, Vector3.up);
+                }
+                rb.angularVelocity = Vector3.zero;
+                isCorrectingOrientation = false;
+                Debug.Log("✅ Orientation locked to upright");
+            }
+            return;
         }
+        
+        // If angle is too small, don't bother correcting
+        if (angleFromUpright < minCorrectionAngle)
+        {
+            rb.angularVelocity *= 0.95f; // Light damping
+            return;
+        }
+        
+        isCorrectingOrientation = true;
+        
+        // Determine correction intensity based on angle
+        bool isExtremeAngle = angleFromUpright > maxCorrectionAngle;
+        float correctionSpeed = isExtremeAngle ? extremeCorrectionSpeed : normalCorrectionSpeed;
+        float torqueMultiplier = isExtremeAngle ? 2f : 1f;
+        
+        // Log when we detect extreme angles
+        if (isExtremeAngle && Time.frameCount % 30 == 0) // Log every 30 frames
+        {
+            Debug.Log($"⚠️ Correcting extreme angle: {angleFromUpright:F1}° from upright");
+        }
+        
+        // METHOD 1: Physics-based torque correction (smooth and natural)
+        if (usePhysicsCorrection)
+        {
+            Vector3 torqueAxis = Vector3.Cross(currentUp, targetUp);
+            float torqueMagnitude = torqueAxis.magnitude;
+            
+            if (torqueMagnitude > 0.001f)
+            {
+                Vector3 torqueDirection = torqueAxis / torqueMagnitude;
+                
+                // Apply corrective torque
+                float appliedTorque = uprightTorque * torqueMultiplier * Mathf.Clamp01(angleFromUpright / 90f);
+                rb.AddTorque(torqueDirection * appliedTorque, ForceMode.Acceleration);
+                
+                // Apply damping to prevent oscillation
+                rb.angularVelocity = Vector3.Lerp(
+                    rb.angularVelocity, 
+                    Vector3.zero, 
+                    Time.fixedDeltaTime * stabilizationDamping
+                );
+            }
+        }
+        
+        // METHOD 2: Direct rotation correction (guaranteed to work)
+        if (useDirectCorrection)
+        {
+            // Calculate target rotation that maintains forward direction but corrects up vector
+            Vector3 currentForward = transform.forward;
+            Vector3 projectedForward = Vector3.ProjectOnPlane(currentForward, targetUp);
+            
+            Quaternion targetRotation;
+            if (projectedForward.sqrMagnitude > 0.01f)
+            {
+                targetRotation = Quaternion.LookRotation(projectedForward.normalized, targetUp);
+            }
+            else
+            {
+                // If we're completely vertical, just use right as forward
+                targetRotation = Quaternion.LookRotation(Vector3.right, targetUp);
+            }
+            
+            // Slerp toward target rotation
+            float slerpSpeed = correctionSpeed * Time.fixedDeltaTime;
+            
+            // Use faster correction for extreme angles
+            if (isExtremeAngle)
+            {
+                slerpSpeed *= 1.5f; // 50% faster for extreme cases
+            }
+            
+            transform.rotation = Quaternion.Slerp(
+                transform.rotation, 
+                targetRotation, 
+                slerpSpeed
+            );
+            
+            // Aggressively dampen angular velocity for extreme angles
+            if (isExtremeAngle)
+            {
+                rb.angularVelocity = Vector3.Lerp(
+                    rb.angularVelocity, 
+                    Vector3.zero, 
+                    Time.fixedDeltaTime * 15f
+                );
+            }
+        }
+        
+        // Always preserve horizontal velocity while correcting
+        Vector3 horizontalVelocity = new Vector3(rb.velocity.x, 0, rb.velocity.z);
+        float verticalVelocity = rb.velocity.y;
+        
+        // Reduce bounce on extreme corrections
+        if (isExtremeAngle && Mathf.Abs(verticalVelocity) > 0.5f)
+        {
+            verticalVelocity *= 0.7f;
+        }
+        
+        rb.velocity = horizontalVelocity + Vector3.up * verticalVelocity;
     }
 
     void Push()
@@ -419,9 +810,22 @@ public class PlayerController : MonoBehaviour
 
     void HandleInput()
     {
-#if UNITY_EDITOR || UNITY_STANDALONE
+        // WebGL can use mouse on desktop OR touch on mobile
+        // Check for actual input type instead of platform
+#if UNITY_WEBGL && !UNITY_EDITOR
+        // WebGL build - support both mouse and touch
+        if (Input.touchCount > 0)
+        {
+            HandleTouchInput();
+        }
+        else if (Input.GetMouseButton(0) || Input.GetMouseButtonDown(0) || Input.GetMouseButtonUp(0))
+        {
+            HandleMouseInput();
+        }
+#elif UNITY_EDITOR || UNITY_STANDALONE
         HandleMouseInput();
 #else
+        // Mobile platforms
         HandleTouchInput();
 #endif
     }

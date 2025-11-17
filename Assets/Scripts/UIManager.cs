@@ -35,6 +35,8 @@ public class UIManager : MonoBehaviour
     [Header("=== UI REFERENCES ===")]
     public StaminaBarUI staminaBarPrefab;
     private StaminaBarUI staminaBarInstance;
+    public HealthBarUI healthBarPrefab;
+    private HealthBarUI healthBarInstance;
     public ComboTextSpawner comboTextSpawnerPrefab;
     private ComboTextSpawner comboTextSpawnerInstance;
     public TrickText trickTextPrefab;
@@ -107,6 +109,13 @@ public class UIManager : MonoBehaviour
         {
             staminaBarInstance = Instantiate(staminaBarPrefab, uiCanvas.transform);
             staminaBarInstance.name = "StaminaBar";
+        }
+
+        // Initialize health bar (existing system)
+        if (healthBarPrefab != null)
+        {
+            healthBarInstance = Instantiate(healthBarPrefab, uiCanvas.transform);
+            healthBarInstance.name = "HealthBar";
         }
 
         // Initialize combo text spawner (existing system)
@@ -193,6 +202,17 @@ public class UIManager : MonoBehaviour
         if (staminaBarInstance != null)
         {
             staminaBarInstance.UpdateStamina(current, max);
+        }
+    }
+
+    /// <summary>
+    /// Updates the player's stamina bar.
+    /// </summary>
+    public void UpdateHealth(float current, float max)
+    {
+        if (healthBarInstance != null)
+        {
+            healthBarInstance.UpdateHealth(current, max);
         }
     }
 

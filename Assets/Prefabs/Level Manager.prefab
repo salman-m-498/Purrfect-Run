@@ -10,6 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 419259032646534190}
   - component: {fileID: 3507050928694996666}
+  - component: {fileID: 830579852101741526}
   m_Layer: 0
   m_Name: Level Manager
   m_TagString: Untagged
@@ -51,3 +52,16 @@ MonoBehaviour:
   skillTarget: 0
   startPoint: {fileID: 0}
   finishPoint: {fileID: 0}
+--- !u!114 &830579852101741526
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6179253548896038962}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 68e31a5ef26277c4ba1dde22d1bf1d9e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  rotationSpeed: 1

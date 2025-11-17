@@ -33,6 +33,7 @@ public class GameManager : MonoBehaviour
     public LevelManager levelManager;
     public ScoreSystem scoreSystem;
     public StaminaSystem staminaSystem;
+    public HealthSystem healthSystem;
     public StoreManager storeManager;
     public UIManager uiManager;
     public SkillCheckSystem skillCheckSystem;
@@ -62,6 +63,9 @@ public class GameManager : MonoBehaviour
     public int baseScoreRequirement = 5000;
     public float scoreMultiplierPerLevel = 1.2f;
     public float baseLevelDuration = 60f;
+
+    [Header("Enemy System")]
+    public WaveController waveController;
 
     // Events
     public System.Action<GameState> OnGameStateChanged;
@@ -102,6 +106,8 @@ public class GameManager : MonoBehaviour
             scoreSystem = FindObjectOfType<ScoreSystem>();
         if (staminaSystem == null)
             staminaSystem = FindObjectOfType<StaminaSystem>();
+            if (healthSystem == null)
+            healthSystem = FindObjectOfType<HealthSystem>();
         if (storeManager == null)
             storeManager = FindObjectOfType<StoreManager>();
         if (uiManager == null)
@@ -299,6 +305,7 @@ public class GameManager : MonoBehaviour
     private void StartLevel()
     {
         Time.timeScale = 1f;
+        if (waveController != null) waveController.OnLevelStart(currentRound, currentLevelInRound);
 
         // Determine level type
         LevelType levelType = (currentLevelInRound == 3) ? LevelType.SkillCheck : LevelType.Normal;

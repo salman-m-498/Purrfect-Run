@@ -106,13 +106,45 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   player: {fileID: 0}
-  followOffset: {x: 1.2, y: 0.8, z: -3}
+  sideFollowOffset: {x: 2, y: 0.8, z: -6}
+  backFollowOffset: {x: 0, y: 1.8, z: -6}
+  FollowBehind: 1
+  useMovementDirection: 1
+  minSpeedForDirection: 0.5
+  xRotationClamp: {x: -5, y: 5}
   followSmoothness: 5
   rotationSmoothness: 5
+  rotationSmoothnessInAir: 2
+  enableLookAhead: 1
+  lookAheadDistance: 2
+  lookAheadSmoothness: 3
+  enableDynamicDistance: 1
+  minDistanceMultiplier: 0.8
+  maxDistanceMultiplier: 1.5
+  speedThresholdForMaxDistance: 20
+  distanceSmoothness: 3
+  enableDynamicHeight: 1
+  heightBoostInAir: 1.5
+  heightBoostSpeed: 15
+  heightSmoothness: 4
+  enableCollisionAvoidance: 1
+  collisionLayers:
+    serializedVersion: 2
+    m_Bits: 192
+  collisionBuffer: 0.3
+  collisionSmoothness: 8
   maxTiltAngle: 10
   tiltSmoothness: 5
   baseFOV: 60
   maxFOV: 75
   fovSpeedInfluence: 10
   shakeDuration: 0.2
-  shakeMagnitude: 0.2
+  shakeMagnitude: 0
+  landingShakeMagnitude: 0
+  landingShakeDuration: 0.3
+  enableLandingImpact: 0
+  landingFOVPunch: 10
+  landingFOVPunchDuration: 0.3
+  isGrinding: 0
+  grindRotationLock: 0.9
+  modeTransitionTime: 0.5
