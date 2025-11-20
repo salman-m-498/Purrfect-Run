@@ -1,0 +1,80 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &2022715923341828714
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 3323389045680977265}
+  - component: {fileID: 1380721266921680144}
+  - component: {fileID: 2169893210728184431}
+  m_Layer: 7
+  m_Name: Level Editor
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &3323389045680977265
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2022715923341828714}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0.034620263, w: 0.99940056}
+  m_LocalPosition: {x: 57.26, y: 7.62, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1380721266921680144
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2022715923341828714}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0167e0d0c3492b64f8ca7657ff6f39cf, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  controlPoints:
+  - {x: 0, y: 0, z: 0}
+  - {x: 5, y: 0, z: 0}
+  - {x: 10, y: 0, z: 0}
+  loop: 0
+  gizmoColor: {r: 0, g: 1, b: 1, a: 1}
+  handleSize: 0.3
+--- !u!114 &2169893210728184431
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2022715923341828714}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1b31f292fc46a1f4f80d6044dd35baba, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  sampleDistance: 1
+  simplifyTolerance: 0.25
+  alignToWorldRight: 1
+  width: 6
+  bankFactor: 1
+  heightOffset: 0
+  material: {fileID: 2100000, guid: 685096c9322c7f549afabe6f51ac8234, type: 2}
+  uvScale: 1
+  flatShaded: 1
+  colliderMode: 2
+  physicsMaterial: {fileID: 0}
+  generateLightmapUVs: 0
+  combineMesh: 0
+  generatedMesh: {fileID: 0}

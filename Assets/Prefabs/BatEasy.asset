@@ -16,7 +16,7 @@ MonoBehaviour:
   idleFloatAmplitude: 0.5
   moveSpeed: 6
   swoopSpeed: 12
-  detectRange: 10
+  detectRange: 50
   swoopCooldown: 3
   attackDamage: 10
   attackRange: 1.5

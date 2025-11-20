@@ -1,0 +1,5 @@
+newmtl Grass
+map_Kd Grass.png
+Kd 0.1603774 0.1603774 0.1603774
+d 1
+
