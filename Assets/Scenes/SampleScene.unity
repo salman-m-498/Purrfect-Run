@@ -38,7 +38,7 @@ RenderSettings:
   m_ReflectionIntensity: 1
   m_CustomReflection: {fileID: 0}
   m_Sun: {fileID: 705507994}
-  m_IndirectSpecularColor: {r: 0.27695608, g: 0.20157665, b: 0.39306542, a: 1}
+  m_IndirectSpecularColor: {r: 0.2771706, g: 0.20167693, b: 0.3932145, a: 1}
   m_UseRadianceAmbientProbe: 0
 --- !u!157 &3
 LightmapSettings:
@@ -153,6 +153,81 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   color: {r: 0, g: 0, b: 0, a: 1}
   thickness: 0.01
+--- !u!1 &265032593
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 265032595}
+  - component: {fileID: 265032594}
+  m_Layer: 6
+  m_Name: EndlessLevelGenerator
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &265032594
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 265032593}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5db3b7350f0dcdb42ba14d3cd144cd40, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  segmentsPerSection: 10
+  sectionSpacing: 20
+  totalSections: 20
+  flatSectionChance: 0.4
+  upSlopeChance: 0.2
+  downSlopeChance: 0.4
+  maxSlopeHeight: 8.98
+  minSectionLength: 10
+  gapChance: 0.035
+  gapLength: 10
+  levelMaterial: {fileID: 2100000, guid: 685096c9322c7f549afabe6f51ac8234, type: 2}
+  width: 50
+  bankFactor: 0
+  physicsMaterial: {fileID: 0}
+  grindRailMaterial: {fileID: 2100000, guid: 24e795a673f9fde4180dafa1e24bf221, type: 2}
+  grindRailRadius: 0.3
+  grindRailSegments: 8
+  grindRailPhysicsMaterial: {fileID: 0}
+  treeMaterials:
+  - {fileID: 2100000, guid: c7260c93f2424ff419b697bf73a746f1, type: 2}
+  rockMaterials:
+  - {fileID: 2100000, guid: c7260c93f2424ff419b697bf73a746f1, type: 2}
+  decorationDensity: 0.5
+  decorationOffset: 5
+  decorationHeightVariation: 0
+  groundLayerName: Ground
+  grindableLayerName: Grindable
+  decorationLayerName: Decoration
+  createPlayerSpawn: 1
+  spawnMarkerName: EndlessStart
+  randomSeed: 86587
+--- !u!4 &265032595
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 265032593}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -420.2, y: -16.7, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &286076153
 GameObject:
   m_ObjectHideFlags: 0
@@ -958,7 +1033,7 @@ Transform:
   m_GameObject: {fileID: 845004842}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -45.18, y: 0.51, z: 0}
+  m_LocalPosition: {x: 0, y: 0.486, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -997,7 +1072,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6424bd78e210de544aa8a989ca9fddf9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  targetState: 1
+  targetState: 7
   oneTimeOnly: 1
   triggerOnExit: 0
   playerTag: 
@@ -1084,7 +1159,7 @@ GameObject:
   - component: {fileID: 947490441}
   - component: {fileID: 947490440}
   - component: {fileID: 947490443}
-  m_Layer: 6
+  m_Layer: 0
   m_Name: Ground
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -1198,6 +1273,72 @@ GameObject:
   m_CorrespondingSourceObject: {fileID: 5578471011257996970, guid: ed59bce60a330234e99b3ea08a676096, type: 3}
   m_PrefabInstance: {fileID: 7518269294371471547}
   m_PrefabAsset: {fileID: 0}
+--- !u!1 &988427224
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 988427226}
+  - component: {fileID: 988427225}
+  m_Layer: 0
+  m_Name: Endless Game Manager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &988427225
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 988427224}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4ea0ead78ce0cf54286c1cdae0f38158, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  currentState: 0
+  levelGenerator: {fileID: 265032594}
+  levelCheckDistance: 50
+  levelCleanupDistance: 120
+  sectionsToPregenerate: 100
+  waveController: {fileID: 2133453059}
+  waveStartDelay: 3
+  baseWaveEnemyCount: 3
+  baseWaveInterval: 2
+  waveScalingPerDistance: 0.05
+  progressionDistance: 0
+  currentDifficultyMultiplier: 1
+  maxDifficultyMultiplier: 5
+  scoreSystem: {fileID: 1461737387}
+  scorePerMeterTraveled: 0
+  scorePerEnemyKilled: 100
+  playerController: {fileID: 1619944359}
+  uiManager: {fileID: 477286303}
+  gameManager: {fileID: 1515725623}
+  cam: {fileID: 963194229}
+  fallDeathHeight: -142.4
+  outOfBoundsZDistance: 10
+--- !u!4 &988427226
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 988427224}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &1004298829 stripped
 MonoBehaviour:
   m_CorrespondingSourceObject: {fileID: 3507050928694996666, guid: 1a6f9341c0b988d4daf993d991f9550c, type: 3}
@@ -1419,11 +1560,18 @@ MonoBehaviour:
   healthRegen: 0
   groundedRegenBonus: 0
   invulnerabilitySeconds: 0.5
+  shieldDuration: 0
   gameManager: {fileID: 1515725623}
   OnHealthChanged:
     m_PersistentCalls:
       m_Calls: []
   OnDeath:
+    m_PersistentCalls:
+      m_Calls: []
+  OnShieldApplied:
+    m_PersistentCalls:
+      m_Calls: []
+  OnShieldBroken:
     m_PersistentCalls:
       m_Calls: []
 --- !u!114 &1619944362
@@ -1755,6 +1903,10 @@ PrefabInstance:
       propertyPath: scoreSystem
       value: 
       objectReference: {fileID: 1461737387}
+    - target: {fileID: 125831783339448925, guid: b7b79c20665e4ac4d9fb039f842a7b4d, type: 3}
+      propertyPath: currentState
+      value: 7
+      objectReference: {fileID: 0}
     - target: {fileID: 125831783339448925, guid: b7b79c20665e4ac4d9fb039f842a7b4d, type: 3}
       propertyPath: healthSystem
       value: 
@@ -2209,17 +2361,29 @@ PrefabInstance:
       propertyPath: m_BlendShapeWeights.Array.data[0]
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 5337642299893041713, guid: ed59bce60a330234e99b3ea08a676096, type: 3}
+      propertyPath: maxMoveSpeed
+      value: 25
+      objectReference: {fileID: 0}
     - target: {fileID: 5578471011257996970, guid: ed59bce60a330234e99b3ea08a676096, type: 3}
       propertyPath: m_Name
       value: Skateboard
       objectReference: {fileID: 0}
+    - target: {fileID: 5578471011257996970, guid: ed59bce60a330234e99b3ea08a676096, type: 3}
+      propertyPath: m_TagString
+      value: Player
+      objectReference: {fileID: 0}
+    - target: {fileID: 8444483506234204296, guid: ed59bce60a330234e99b3ea08a676096, type: 3}
+      propertyPath: m_Constraints
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 9062481279587191150, guid: ed59bce60a330234e99b3ea08a676096, type: 3}
       propertyPath: m_LocalPosition.x
-      value: -46.544
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 9062481279587191150, guid: ed59bce60a330234e99b3ea08a676096, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0.403
+      value: 0.5
       objectReference: {fileID: 0}
     - target: {fileID: 9062481279587191150, guid: ed59bce60a330234e99b3ea08a676096, type: 3}
       propertyPath: m_LocalPosition.z
@@ -2379,3 +2543,5 @@ SceneRoots:
   - {fileID: 344616164}
   - {fileID: 2133453058}
   - {fileID: 340683538}
+  - {fileID: 265032595}
+  - {fileID: 988427226}

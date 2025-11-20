@@ -63,11 +63,11 @@ public class LevelManager : MonoBehaviour
         levelStartTime = Time.time;
 
         // Move player to start
-        if (playerController != null && startPoint != null)
-        {
-            playerController.transform.position = startPoint.position;
-            playerController.ResetState();
-        }
+        if (startPoint != null)
+            {
+                PlayerSpawnSystem.SetStartPoint(startPoint); // tell spawner where to put player
+                PlayerSpawnSystem.SpawnPlayer();             // actually do it
+            }
 
         // Initialize UI
         if (uiManager != null)

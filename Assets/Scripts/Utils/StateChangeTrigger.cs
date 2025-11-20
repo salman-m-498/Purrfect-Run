@@ -3,6 +3,7 @@ using UnityEngine;
 /// <summary>
 /// Trigger-based state changer: Walk into a trigger volume and transition to a new GameState.
 /// Integrates with GameManager for state management.
+/// For EndlessGameMode specifically, also initializes the EndlessGameManager.
 /// 
 /// USAGE:
 /// 1. Create an empty GameObject in your scene
@@ -113,6 +114,25 @@ public class StateChangeTrigger : MonoBehaviour
     private void ChangeState()
     {
         GameManager.Instance.ChangeGameState(targetState);
+        
+        // If transitioning to endless mode, initialize the endless game manager
+        if (targetState == GameState.Endless)
+        {
+            if (debugLogging)
+                Debug.Log($"StateChangeTrigger: Initializing EndlessGameMode");
+            
+            EndlessGameManager endlessManager = FindObjectOfType<EndlessGameManager>();
+            if (endlessManager != null)
+            {
+                if (debugLogging)
+                    Debug.Log($"StateChangeTrigger: Found EndlessGameManager, calling StartEndlessGame()");
+                endlessManager.StartEndlessGame();
+            }
+            else
+            {
+                Debug.LogError($"StateChangeTrigger: Could not find EndlessGameManager in scene!");
+            }
+        }
         
         // Disable trigger after use if one-time-only
         if (oneTimeOnly)

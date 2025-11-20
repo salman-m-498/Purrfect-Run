@@ -21,7 +21,7 @@ public class EndlessGameManager : MonoBehaviour
 
     [Header("Endless Level Generation")]
     public EndlessLevelGenerator levelGenerator;
-    public float levelCheckDistance = 50f; // How far ahead to spawn new sections
+    public float levelCheckDistance = 50f; // How far ahead to check for new sections
     public float levelCleanupDistance = 100f; // How far behind to destroy sections
     public int sectionsToPregenerate = 3; // Keep this many sections ahead generated
 
@@ -54,7 +54,6 @@ public class EndlessGameManager : MonoBehaviour
 
     private GameObject currentLevelParent;
     private List<GameObject> activeLevelSections = new List<GameObject>();
-    private float levelGenerationProgress = 0f;
     private int waveNumber = 0;
     private Coroutine waveCoroutine;
     private bool gameActive = false;
@@ -78,12 +77,27 @@ public class EndlessGameManager : MonoBehaviour
 
     void Start()
     {
+        Debug.Log("🎮 EndlessGameManager.Start() called");
         FindReferences();
+        
+        if (levelGenerator == null)
+            Debug.LogError("❌ levelGenerator is null after FindReferences()");
+        if (playerController == null)
+            Debug.LogError("❌ playerController is null after FindReferences()");
     }
 
     void Update()
     {
-        if (currentState != EndlessGameState.Playing) return;
+        // Debug state changes
+        if (currentState == EndlessGameState.Playing && !gameActive)
+        {
+            Debug.LogWarning("⚠️ State is Playing but gameActive is false!");
+        }
+        
+        if (currentState != EndlessGameState.Playing) 
+        {
+            return;
+        }
 
         // Check loss conditions
         CheckLossConditions();
@@ -101,7 +115,7 @@ public class EndlessGameManager : MonoBehaviour
 
     public void StartEndlessGame()
     {
-        Debug.Log("🎮 Starting Endless Mode!");
+        Debug.Log("🎮 StartEndlessGame() called!");
         
         gameActive = true;
         currentState = EndlessGameState.Playing;
@@ -109,24 +123,46 @@ public class EndlessGameManager : MonoBehaviour
         currentDifficultyMultiplier = 1f;
         waveNumber = 0;
 
-        // Initialize level generator
-        if (levelGenerator != null)
+        // Make sure the very first level chunk exists
+        if (levelGenerator != null && !GameObject.Find("GeneratedLevel"))
+            levelGenerator.GenerateEndlessLevel();   // or GenerateAndCreate()
+
+        // Get the already-generated level from the scene
+        // The EndlessLevelGenerator should have already created "GeneratedLevel" parent
+        currentLevelParent = GameObject.Find("GeneratedLevel");
+        Debug.Log($"🔍 Looking for GeneratedLevel... Found: {(currentLevelParent != null ? "✅ YES" : "❌ NO")}");
+        
+        if (currentLevelParent == null)
         {
-            levelGenerator.randomSeed = Random.Range(0, 100000); // Random seed each run
-            levelGenerator.GenerateEndlessLevel();
-            levelGenerator.CreateLevelFromControlPoints();
-            // Get generated level parent from the scene
-            currentLevelParent = GameObject.Find("GeneratedLevel");
-            if (currentLevelParent == null)
-                currentLevelParent = new GameObject("GeneratedLevel");
+            Debug.LogError("❌ GeneratedLevel not found in scene! Make sure EndlessLevelGenerator has been run and level is in the scene.");
+            return;
         }
+
+        // guarantee cursor is in the right place before we ever ask for more
+        levelGenerator.SyncCursorToRightmostPoint();
+
+        // Collect all existing level segments (LevelSegment_0, LevelSegment_1, etc.)
+        // These were created by EndlessLevelGenerator
+        activeLevelSections.Clear();
+        LevelBuilder[] levelSegments = currentLevelParent.GetComponentsInChildren<LevelBuilder>();
+        foreach (var builder in levelSegments)
+        {
+            activeLevelSections.Add(builder.gameObject);
+        }
+        
+        Debug.Log($"🔍 Collected {activeLevelSections.Count} existing level segments from scene.");
 
         // Initialize player
         if (playerController != null)
         {
             playerController.Initialize(gameManager ?? FindObjectOfType<GameManager>());
             playerController.ResetForNewLevel();
-            playerController.transform.position = new Vector3(-204.723953f, 22.3436966f, 0); // Start of level
+            Transform spawnT = GameObject.FindWithTag("PlayerSpawn")?.transform;
+            if (spawnT != null)
+            {
+                PlayerSpawnSystem.SetStartPoint(spawnT);
+                PlayerSpawnSystem.SpawnPlayer();
+            }
         }
 
         // Initialize score system
@@ -218,17 +254,57 @@ public class EndlessGameManager : MonoBehaviour
 
     private void UpdateLevelGeneration()
     {
-        if (playerController == null || levelGenerator == null) return;
-
-        float playerX = playerController.transform.position.x;
-
-        // Generate new sections if needed
-        if (levelGenerationProgress < playerX + (sectionSpacing * sectionsToPregenerate))
+        if (playerController == null || levelGenerator == null || currentLevelParent == null) 
         {
-            GenerateNewLevelSection();
+            if (playerController == null) Debug.LogWarning("❌ playerController is null");
+            if (levelGenerator == null) Debug.LogWarning("❌ levelGenerator is null");
+            if (currentLevelParent == null) Debug.LogWarning("❌ currentLevelParent is null");
+            return;
         }
 
-        // Cleanup old sections
+        float playerX = playerController.transform.position.x;
+        
+        // Get the current generation progress from the generator
+        float generationProgressX = levelGenerator.GetCurrentGenerationX();
+
+        // Generate new sections if player is getting close to the end of generated content
+        if (playerX + levelCheckDistance > generationProgressX)
+        {
+            Debug.Log($"🏗️ Player at X={playerX:F1}, generation at X={generationProgressX:F1}. Generating ahead...");
+            GenerateNewLevelSectionsUsingGenerator();
+        }
+
+        // Cleanup old sections that are far behind the player
+        CleanupOldSections(playerX);
+    }
+
+    private void GenerateNewLevelSectionsUsingGenerator()
+    {
+        if (levelGenerator == null || currentLevelParent == null) return;
+        
+        float beforeProgress = levelGenerator.GetCurrentGenerationX();
+        
+        // Use incremental generation to add new sections without clearing
+        levelGenerator.GenerateAdditionalSections(sectionsToPregenerate);
+        
+        // Refresh the list of active sections
+        int previousCount = activeLevelSections.Count;
+        activeLevelSections.Clear();
+        
+        LevelBuilder[] levelSegments = currentLevelParent.GetComponentsInChildren<LevelBuilder>();
+        foreach (var builder in levelSegments)
+        {
+            activeLevelSections.Add(builder.gameObject);
+        }
+        
+        float afterProgress = levelGenerator.GetCurrentGenerationX();
+        
+        Debug.Log($"✅ Generated {sectionsToPregenerate} new sections. Total segments: {activeLevelSections.Count} (was {previousCount}). Progress: X={afterProgress:F1} (was {beforeProgress:F1})");
+    }
+
+    private void CleanupOldSections(float playerX)
+    {
+        // Cleanup old sections that are far behind the player
         for (int i = activeLevelSections.Count - 1; i >= 0; i--)
         {
             if (activeLevelSections[i] == null)
@@ -237,97 +313,23 @@ public class EndlessGameManager : MonoBehaviour
                 continue;
             }
 
-            float sectionX = activeLevelSections[i].transform.position.x;
-            if (sectionX < playerX - levelCleanupDistance)
-            {
-                Debug.Log($"🧹 Destroying level section at X={sectionX:F1}");
-                Destroy(activeLevelSections[i]);
-                activeLevelSections.RemoveAt(i);
-            }
-        }
-    }
-
-    private void GenerateNewLevelSection()
-    {
-        Debug.Log($"📍 Generating new level section (Current: {levelGenerationProgress:F1})");
-        
-        // Create a new spline section
-        int sectionIndex = activeLevelSections.Count;
-        float currentX = levelGenerationProgress;
-        float currentY = GetHeightAtX(currentX);
-
-        // Randomly determine section type
-        float rand = Random.value;
-        float endX = currentX + sectionSpacing;
-        float endY = currentY;
-        string sectionType = "";
-
-        if (rand < 0.4f)
-        {
-            sectionType = "FLAT";
-            endY = currentY;
-        }
-        else if (rand < 0.7f)
-        {
-            sectionType = "UP";
-            endY = currentY + Random.Range(5f, 15f);
-        }
-        else
-        {
-            sectionType = "DOWN";
-            endY = currentY - Random.Range(5f, 15f);
-        }
-
-        // Create spline section
-        GameObject sectionGO = new GameObject($"LevelSection_{sectionIndex}");
-        sectionGO.transform.SetParent(currentLevelParent.transform);
-
-        SplineComponent spline = sectionGO.AddComponent<SplineComponent>();
-        List<Vector3> points = new List<Vector3>
-        {
-            new Vector3(currentX, currentY, 0),
-            new Vector3((currentX + endX) * 0.5f, (currentY + endY) * 0.5f, 0),
-            new Vector3(endX, endY, 0)
-        };
-        spline.controlPoints = points;
-
-        // Build level mesh/colliders
-        LevelBuilder builder = sectionGO.AddComponent<LevelBuilder>();
-        builder.sampleDistance = 1f;
-        builder.simplifyTolerance = 0.1f;
-        builder.alignToWorldRight = false;
-        builder.width = levelGenerator.width;
-        builder.bankFactor = levelGenerator.bankFactor;
-        builder.colliderMode = LevelBuilder.ColliderMode.BoxSegments;
-        builder.material = levelGenerator.levelMaterial;
-        builder.physicsMaterial = levelGenerator.physicsMaterial;
-
-        builder.Generate();
-
-        activeLevelSections.Add(sectionGO);
-        levelGenerationProgress = endX;
-
-        Debug.Log($"✅ Section {sectionType}: X [{currentX:F1} → {endX:F1}] Y [{currentY:F1} → {endY:F1}]");
-    }
-
-    private float GetHeightAtX(float x)
-    {
-        // Get height from existing level or interpolate
-        if (activeLevelSections.Count > 0)
-        {
-            // Use last section's endpoint as reference
-            GameObject lastSection = activeLevelSections[activeLevelSections.Count - 1];
-            SplineComponent spline = lastSection.GetComponent<SplineComponent>();
+            // Get the leftmost point of this section to determine its position
+            SplineComponent spline = activeLevelSections[i].GetComponent<SplineComponent>();
             if (spline != null && spline.controlPoints.Count > 0)
             {
-                return spline.controlPoints[spline.controlPoints.Count - 1].y;
+                float sectionStartX = spline.controlPoints[0].x;
+                float sectionEndX = spline.controlPoints[spline.controlPoints.Count - 1].x;
+                
+                // Only destroy if the END of the section is behind the cleanup distance
+                if (sectionEndX < playerX - levelCleanupDistance)
+                {
+                    Debug.Log($"🧹 Destroying level section (X={sectionStartX:F1} to {sectionEndX:F1}), player at X={playerX:F1}");
+                    Destroy(activeLevelSections[i]);
+                    activeLevelSections.RemoveAt(i);
+                }
             }
         }
-
-        return 20f; // Default starting height
     }
-
-    private float sectionSpacing => levelGenerator.sectionSpacing;
 
     // ============================================================
     // PROGRESSION & DIFFICULTY
@@ -468,18 +470,48 @@ public class EndlessGameManager : MonoBehaviour
 
         // Draw fall threshold
         Gizmos.color = Color.red;
-        Gizmos.DrawLine(playerPos - Vector3.right * 50, playerPos + Vector3.right * 50);
-        for (int i = 0; i < 10; i++)
-        {
-            Gizmos.DrawLine(
-                playerPos + Vector3.right * (i * 10 - 45) - Vector3.up * 2,
-                playerPos + Vector3.right * (i * 10 - 45)
-            );
-        }
+        Gizmos.DrawLine(
+            new Vector3(playerPos.x - 50, fallDeathHeight, 0), 
+            new Vector3(playerPos.x + 50, fallDeathHeight, 0)
+        );
 
         // Draw Z bounds
         Gizmos.color = Color.yellow;
-        Gizmos.DrawLine(playerPos - Vector3.forward * outOfBoundsZDistance, playerPos + Vector3.forward * outOfBoundsZDistance);
+        Gizmos.DrawLine(
+            playerPos + Vector3.forward * outOfBoundsZDistance + Vector3.left * 20,
+            playerPos + Vector3.forward * outOfBoundsZDistance + Vector3.right * 20
+        );
+        Gizmos.DrawLine(
+            playerPos - Vector3.forward * outOfBoundsZDistance + Vector3.left * 20,
+            playerPos - Vector3.forward * outOfBoundsZDistance + Vector3.right * 20
+        );
+        
+        // Draw generation trigger distance
+        if (levelGenerator != null)
+        {
+            float generationX = levelGenerator.GetCurrentGenerationX();
+            Gizmos.color = Color.cyan;
+            Gizmos.DrawLine(
+                new Vector3(generationX, playerPos.y - 10, 0),
+                new Vector3(generationX, playerPos.y + 10, 0)
+            );
+            
+            // Draw check distance
+            Gizmos.color = Color.green;
+            float checkX = playerPos.x + levelCheckDistance;
+            Gizmos.DrawLine(
+                new Vector3(checkX, playerPos.y - 5, 0),
+                new Vector3(checkX, playerPos.y + 5, 0)
+            );
+        }
+        
+        // Draw cleanup distance
+        Gizmos.color = Color.red;
+        float cleanupX = playerPos.x - levelCleanupDistance;
+        Gizmos.DrawLine(
+            new Vector3(cleanupX, playerPos.y - 5, 0),
+            new Vector3(cleanupX, playerPos.y + 5, 0)
+        );
     }
 #endif
 }
