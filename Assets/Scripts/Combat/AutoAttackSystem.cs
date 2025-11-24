@@ -122,7 +122,7 @@ public class AutoAttackSystem : MonoBehaviour
         if (GameManager.Instance == null) return;
 
         // get closest enemy
-        BatEnemy target = EnemyManager.GetClosestEnemy(ownerTransform.position);
+        IEnemy target = EnemyManager.GetClosestEnemy(ownerTransform.position);
         if (target == null) return;
 
         // Fire projectileCount projectiles using small spread

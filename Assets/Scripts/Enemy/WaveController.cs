@@ -3,19 +3,36 @@ using System.Collections;
 using System.Collections.Generic;
 
 /// <summary>
-/// Vampire Survivors style wave controller with increasing difficulty
-/// Integrates with your existing GameManager round system
+/// Vampire Survivors style wave controller with multiple enemy types
+/// Modified for skating game - spawns enemies in front of fast-moving player
 /// </summary>
 public class WaveController : MonoBehaviour
 {
     [System.Serializable]
+    public class EnemySpawnInfo
+    {
+        public string enemyPoolName;  // "Bat", "Skull", etc.
+        public int count;
+        public EnemyStats statsOverride; // Optional - uses pool default if null
+        [Range(0f, 1f)] public float spawnWeight = 1f; // For random distribution
+    }
+
+    [System.Serializable]
     public class WaveConfig
     {
         public int waveNumber;
-        public int enemyCount;
-        public float spawnInterval;
+        public List<EnemySpawnInfo> enemyTypes = new List<EnemySpawnInfo>();
+        public float spawnInterval = 2f;
         public float spawnRadius = 15f;
-        public EnemyStats enemyStats;
+        
+        // Helper to get total enemy count
+        public int GetTotalCount()
+        {
+            int total = 0;
+            foreach (var enemy in enemyTypes)
+                total += enemy.count;
+            return total;
+        }
     }
 
     [Header("Wave Configuration")]
@@ -28,18 +45,18 @@ public class WaveController : MonoBehaviour
     public float minSpawnInterval = 0.2f;
     public float baseSpawnInterval = 2f;
     
-    [Header("Spawn Area")]
+    [Header("Procedural Enemy Mix")]
+    public List<EnemySpawnInfo> proceduralEnemyTypes = new List<EnemySpawnInfo>();
+    
+    [Header("Spawn Area - Skating Game")]
     public Transform spawnCenter; // Usually the player
-    public float spawnDistance = 15f;
-    public float spawnHeight = 5f;
+    public float spawnAheadDistance = 20f;
+    public float spawnAheadDistanceMax = 30f;
+    public float spawnLateralSpread = 8f;
+    public float spawnHeightAboveGround = 3f;
+    public float velocityPredictionMultiplier = 1.5f;
     public LayerMask groundCheck;
-    [Tooltip("If true, enemies will spawn in an arc in front of the spawn center instead of all around")]
-    public bool spawnInFrontOnly = true;
-    [Tooltip("Arc angle (degrees) used when spawning in front only; centered on spawnCenter.right")]
-    [Range(10f, 180f)]
-    public float spawnArcAngle = 90f;
-    [Tooltip("Minimum spawn distance from the spawn center when spawning in front")]
-    public float spawnMinDistance = 5f;
+    public float maxGroundCheckDistance = 50f;
     
     [Header("Current Wave")]
     public int currentWave = 0;
@@ -49,6 +66,7 @@ public class WaveController : MonoBehaviour
     public int enemiesKilled = 0;
     
     private Coroutine activeWaveCoroutine;
+    private Rigidbody playerRb;
     
     void Start()
     {
@@ -57,17 +75,22 @@ public class WaveController : MonoBehaviour
         {
             spawnCenter = GameManager.Instance.playerController.transform;
         }
+
+        // Cache player rigidbody for velocity prediction
+        if (spawnCenter != null)
+        {
+            playerRb = spawnCenter.GetComponent<Rigidbody>();
+            if (playerRb == null)
+                playerRb = spawnCenter.GetComponentInParent<Rigidbody>();
+        }
         
-        // Subscribe to bat death events
-        BatEnemy.OnBatDeath += OnEnemyKilled;
-        
-        // Start first wave automatically or wait for GameManager signal
-        // StartWave(1);
+        // Subscribe to enemy death events
+        EnemyManager.OnEnemyDeath += OnEnemyKilled;
     }
 
     void OnDestroy()
     {
-        BatEnemy.OnBatDeath -= OnEnemyKilled;
+        EnemyManager.OnEnemyDeath -= OnEnemyKilled;
     }
 
     // ============================================================
@@ -89,7 +112,7 @@ public class WaveController : MonoBehaviour
         
         WaveConfig config = GetWaveConfig(waveNumber);
         
-        Debug.Log($"Starting Wave {waveNumber}: {config.enemyCount} enemies");
+        Debug.Log($"Starting Wave {waveNumber}: {config.GetTotalCount()} enemies of {config.enemyTypes.Count} type(s)");
         
         if (activeWaveCoroutine != null)
             StopCoroutine(activeWaveCoroutine);
@@ -119,30 +142,81 @@ public class WaveController : MonoBehaviour
             return predefined;
         
         // Generate procedural wave
+        return GenerateProceduralWave(waveNumber);
+    }
+
+    private WaveConfig GenerateProceduralWave(int waveNumber)
+    {
         WaveConfig config = new WaveConfig();
         config.waveNumber = waveNumber;
-        config.enemyCount = Mathf.RoundToInt(baseEnemyCount * Mathf.Pow(enemyCountMultiplier, waveNumber - 1));
         config.spawnInterval = Mathf.Max(minSpawnInterval, baseSpawnInterval / Mathf.Sqrt(waveNumber));
-        config.spawnRadius = spawnDistance;
-        config.enemyStats = EnemyPoolManager.Instance?.defaultBatStats;
+        config.spawnRadius = spawnAheadDistance;
+        
+        // Calculate total enemies for this wave
+        int totalEnemies = Mathf.RoundToInt(baseEnemyCount * Mathf.Pow(enemyCountMultiplier, waveNumber - 1));
+        
+        // Distribute enemies based on weights
+        float totalWeight = 0f;
+        foreach (var enemyType in proceduralEnemyTypes)
+            totalWeight += enemyType.spawnWeight;
+        
+        if (totalWeight <= 0f)
+        {
+            Debug.LogError("No procedural enemy types configured!");
+            return config;
+        }
+        
+        // Create spawn info for each enemy type
+        foreach (var template in proceduralEnemyTypes)
+        {
+            EnemySpawnInfo spawnInfo = new EnemySpawnInfo();
+            spawnInfo.enemyPoolName = template.enemyPoolName;
+            spawnInfo.statsOverride = template.statsOverride;
+            spawnInfo.spawnWeight = template.spawnWeight;
+            
+            // Calculate count based on weight
+            float ratio = template.spawnWeight / totalWeight;
+            spawnInfo.count = Mathf.RoundToInt(totalEnemies * ratio);
+            
+            // Ensure at least 1 of each type if weight > 0
+            if (spawnInfo.count == 0 && template.spawnWeight > 0)
+                spawnInfo.count = 1;
+            
+            config.enemyTypes.Add(spawnInfo);
+        }
         
         return config;
     }
 
     private IEnumerator SpawnWaveCoroutine(WaveConfig config)
     {
-        for (int i = 0; i < config.enemyCount; i++)
+        // Create a list of all enemies to spawn with their types
+        List<EnemySpawnInfo> spawnQueue = new List<EnemySpawnInfo>();
+        
+        foreach (var enemyType in config.enemyTypes)
+        {
+            for (int i = 0; i < enemyType.count; i++)
+            {
+                spawnQueue.Add(enemyType);
+            }
+        }
+        
+        // Shuffle for variety
+        ShuffleList(spawnQueue);
+        
+        // Spawn enemies
+        foreach (var spawnInfo in spawnQueue)
         {
             if (!waveActive)
                 yield break;
             
-            SpawnSingleEnemy(config);
+            SpawnSingleEnemy(spawnInfo, config);
             enemiesSpawned++;
             
             yield return new WaitForSeconds(config.spawnInterval);
         }
         
-        Debug.Log($"Wave {currentWave}: All {config.enemyCount} enemies spawned!");
+        Debug.Log($"Wave {currentWave}: All {config.GetTotalCount()} enemies spawned!");
         
         // Wait for all enemies to be killed
         while (enemiesAlive > 0 && waveActive)
@@ -156,58 +230,84 @@ public class WaveController : MonoBehaviour
         }
     }
 
-    // ============================================================
-    // SPAWNING
-    // ============================================================
-
-    private void SpawnSingleEnemy(WaveConfig config)
+    // Fisher-Yates shuffle
+    private void ShuffleList<T>(List<T> list)
     {
-        Vector3 spawnPos = GetRandomSpawnPosition(config.spawnRadius);
-        
-        BatEnemy bat = EnemyPoolManager.Instance?.SpawnEnemy(spawnPos, config.enemyStats);
-        
-        if (bat != null)
+        for (int i = list.Count - 1; i > 0; i--)
         {
-            enemiesAlive++;
+            int j = Random.Range(0, i + 1);
+            T temp = list[i];
+            list[i] = list[j];
+            list[j] = temp;
         }
     }
 
-    private Vector3 GetRandomSpawnPosition(float radius)
+    // ============================================================
+    // SPAWNING - AHEAD OF PLAYER
+    // ============================================================
+
+    private void SpawnSingleEnemy(EnemySpawnInfo spawnInfo, WaveConfig config)
+    {
+        Vector3 spawnPos = GetRandomSpawnPositionAhead();
+        
+        IEnemy enemy = EnemyPoolManager.Instance?.SpawnEnemy(
+            spawnInfo.enemyPoolName, 
+            spawnPos, 
+            spawnInfo.statsOverride
+        );
+        
+        if (enemy != null)
+        {
+            enemiesAlive++;
+        }
+        else
+        {
+            Debug.LogWarning($"Failed to spawn enemy: {spawnInfo.enemyPoolName}");
+        }
+    }
+
+    private Vector3 GetRandomSpawnPositionAhead()
     {
         if (spawnCenter == null)
         {
             Debug.LogWarning("No spawn center set!");
-            return Vector3.up * spawnHeight;
+            return Vector3.up * spawnHeightAboveGround;
         }
-        
-        Vector3 spawnPos = Vector3.up * spawnHeight;
 
-        // If configured to spawn in front only, pick a point inside a forward-facing arc
-        if (spawnInFrontOnly)
+        // Predict where player will be based on velocity
+        Vector3 predictedPlayerPos = spawnCenter.position;
+        if (playerRb != null && playerRb.velocity.sqrMagnitude > 0.1f)
         {
-            // Choose a random angle within the arc (centered on forward)
-            float halfArc = spawnArcAngle * 0.5f;
-            float angle = Random.Range(-halfArc, halfArc);
+            predictedPlayerPos += playerRb.velocity * velocityPredictionMultiplier;
+        }
 
-            // Choose a random distance between min and radius
-            float dist = Random.Range(Mathf.Min(spawnMinDistance, radius), radius);
+        // Player moves on world right (Vector3.right)
+        // Spawn enemies AHEAD of predicted position
+        float aheadDistance = Random.Range(spawnAheadDistance, spawnAheadDistanceMax);
+        Vector3 aheadOffset = Vector3.right * aheadDistance;
 
-            // Direction rotated by angle around Y
-            Vector3 dir = Quaternion.Euler(0f, angle, 0f) * spawnCenter.right;
-            spawnPos = spawnCenter.position + dir.normalized * dist + Vector3.up * spawnHeight;
+        // Add lateral spread (perpendicular to movement direction - world forward)
+        float lateralOffset = Random.Range(-spawnLateralSpread, spawnLateralSpread);
+        Vector3 lateralVector = Vector3.forward * lateralOffset;
+
+        // Combine for XZ position (will adjust Y based on terrain)
+        Vector3 spawnPosXZ = predictedPlayerPos + aheadOffset + lateralVector;
+        
+        // Raycast from high above to find actual ground height
+        Vector3 spawnPos = spawnPosXZ + Vector3.up * 20f; // Start high
+        RaycastHit hit;
+        
+        if (Physics.Raycast(spawnPos, Vector3.down, out hit, maxGroundCheckDistance, groundCheck))
+        {
+            // Found ground - spawn above it
+            spawnPos = hit.point + Vector3.up * spawnHeightAboveGround;
         }
         else
         {
-            // Random position all around player
-            Vector2 randomCircle = Random.insideUnitCircle.normalized * radius;
-            spawnPos = spawnCenter.position + new Vector3(randomCircle.x, spawnHeight, randomCircle.y);
-        }
-        
-        // Optional: Adjust to terrain height
-        RaycastHit hit;
-        if (Physics.Raycast(spawnPos + Vector3.up * 10f, Vector3.down, out hit, 50f, groundCheck))
-        {
-            spawnPos.y = hit.point.y + spawnHeight;
+            // No ground found - use predicted player height as fallback
+            spawnPos = spawnPosXZ;
+            spawnPos.y = predictedPlayerPos.y + spawnHeightAboveGround;
+            Debug.LogWarning($"No ground found at spawn position {spawnPosXZ}, using player height");
         }
         
         return spawnPos;
@@ -217,68 +317,71 @@ public class WaveController : MonoBehaviour
     {
         if (spawnCenter == null) return;
 
-        Gizmos.color = Color.cyan;
-
-        // Draw a small sphere at the spawn center
-        Gizmos.DrawWireSphere(spawnCenter.position, 0.25f);
-
-        if (spawnInFrontOnly)
+        // Predict player position
+        Vector3 predictedPos = spawnCenter.position;
+        if (Application.isPlaying && playerRb != null && playerRb.velocity.sqrMagnitude > 0.1f)
         {
-            // Draw forward arc
-            int steps = 32;
-            float halfArc = spawnArcAngle * 0.5f;
-            Vector3 origin = spawnCenter.position + Vector3.up * spawnHeight;
-            for (int i = 0; i <= steps; i++)
-            {
-                float t = (float)i / steps;
-                float angle = Mathf.Lerp(-halfArc, halfArc, t);
-                Vector3 dir = Quaternion.Euler(0f, angle, 0f) * spawnCenter.right;
-                Vector3 point = origin + dir.normalized * spawnDistance;
-                Gizmos.DrawSphere(point, 0.15f);
-            }
+            predictedPos += playerRb.velocity * velocityPredictionMultiplier;
+        }
 
-            // Draw min distance arc if applicable
-            if (spawnMinDistance > 0f && spawnMinDistance < spawnDistance)
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawWireSphere(predictedPos, 0.5f);
+
+        // Draw spawn zone ahead of player
+        Gizmos.color = Color.cyan;
+        
+        // Sample terrain at multiple points to visualize spawn area
+        int samples = 5;
+        for (int i = 0; i < samples; i++)
+        {
+            float t = i / (float)(samples - 1);
+            float ahead = Mathf.Lerp(spawnAheadDistance, spawnAheadDistanceMax, t);
+            
+            for (int j = -2; j <= 2; j++)
             {
-                Gizmos.color = new Color(0f, 1f, 1f, 0.5f);
-                for (int i = 0; i <= steps; i++)
+                float lateral = (j / 2f) * spawnLateralSpread;
+                Vector3 testPos = predictedPos + Vector3.right * ahead + Vector3.forward * lateral;
+                
+                // Raycast to find terrain height
+                RaycastHit hit;
+                if (Physics.Raycast(testPos + Vector3.up * 20f, Vector3.down, out hit, maxGroundCheckDistance, groundCheck))
                 {
-                    float t = (float)i / steps;
-                    float angle = Mathf.Lerp(-halfArc, halfArc, t);
-                    Vector3 dir = Quaternion.Euler(0f, angle, 0f) * spawnCenter.right;
-                    Vector3 point = origin + dir.normalized * spawnMinDistance;
-                    Gizmos.DrawSphere(point, 0.08f);
+                    Vector3 spawnPoint = hit.point + Vector3.up * spawnHeightAboveGround;
+                    Gizmos.DrawWireSphere(spawnPoint, 0.3f);
+                    
+                    // Draw line from ground to spawn point
+                    Gizmos.color = new Color(0, 1, 0, 0.3f);
+                    Gizmos.DrawLine(hit.point, spawnPoint);
+                    Gizmos.color = Color.cyan;
+                }
+                else
+                {
+                    // No ground found - draw red sphere
+                    Gizmos.color = Color.red;
+                    Gizmos.DrawWireSphere(testPos, 0.2f);
+                    Gizmos.color = Color.cyan;
                 }
             }
         }
-        else
-        {
-            // Draw full circle where enemies can spawn
-            int steps = 36;
-            Vector3 origin = spawnCenter.position + Vector3.up * spawnHeight;
-            for (int i = 0; i <= steps; i++)
-            {
-                float angle = (360f / steps) * i;
-                Vector3 dir = Quaternion.Euler(0f, angle, 0f) * Vector3.forward;
-                Vector3 point = origin + dir.normalized * spawnDistance;
-                Gizmos.DrawSphere(point, 0.12f);
-            }
-        }
+        
+        // Draw center line showing player movement direction
+        Gizmos.color = Color.red;
+        Gizmos.DrawLine(predictedPos, predictedPos + Vector3.right * spawnAheadDistanceMax);
     }
 
     // ============================================================
     // EVENTS
     // ============================================================
 
-    private void OnEnemyKilled(BatEnemy bat)
+    private void OnEnemyKilled(IEnemy enemy)
     {
         enemiesKilled++;
         enemiesAlive--;
         
         // Award score through GameManager
-        if (GameManager.Instance?.scoreSystem != null && bat.stats != null)
+        if (GameManager.Instance?.scoreSystem != null && enemy.stats != null)
         {
-            GameManager.Instance.scoreSystem.AddScore(bat.stats.killScore);
+            GameManager.Instance.scoreSystem.AddScore(enemy.stats.killScore);
         }
         
         Debug.Log($"Wave {currentWave}: {enemiesKilled}/{enemiesSpawned} killed, {enemiesAlive} alive");
@@ -288,7 +391,7 @@ public class WaveController : MonoBehaviour
     {
         waveActive = false;
         
-        Debug.Log($"âœ… Wave {currentWave} Complete! Killed {enemiesKilled} enemies");
+        Debug.Log($"✅ Wave {currentWave} Complete! Killed {enemiesKilled} enemies");
         
         // Notify GameManager or UI
         if (GameManager.Instance != null)
@@ -296,9 +399,6 @@ public class WaveController : MonoBehaviour
             // Award bonus coins for wave completion
             GameManager.Instance.AddCoins(currentWave * 10);
         }
-        
-        // Auto-start next wave after delay (optional)
-        // StartCoroutine(StartNextWaveAfterDelay(5f));
     }
 
     private IEnumerator StartNextWaveAfterDelay(float delay)

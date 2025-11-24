@@ -36,7 +36,10 @@ public class EndlessLevelGenerator : MonoBehaviour
     public float grindRailRadius = 0.3f;
     public int grindRailSegments = 8;
     public PhysicMaterial grindRailPhysicsMaterial;
-    
+
+    [Header("Lava River under rails")]
+    public Material lavaMaterial;
+
     [Header("Decoration Settings")]
     public Material[] treeMaterials;
     public Material[] rockMaterials;
@@ -348,7 +351,8 @@ public class EndlessLevelGenerator : MonoBehaviour
     }
 
     /// <summary>
-    /// Rebuilds a specific segment that was extended with new points
+    /// Rebuilds a specific segment that was extended with new points.
+    /// If the GameObject is missing, recreates it as a fallback.
     /// </summary>
     private void RebuildSegment(int segmentIndex)
     {
@@ -357,15 +361,15 @@ public class EndlessLevelGenerator : MonoBehaviour
             Debug.LogWarning($"Cannot rebuild segment {segmentIndex} - index out of range");
             return;
         }
-        
+
         var segment = splineSegments[segmentIndex];
         if (segment.Count < 2)
         {
-            Debug.LogWarning($"Segment {segmentIndex} has fewer than 2 points, cannot rebuild");
+            Debug.LogWarning($"Segment {segmentIndex} has fewer than 2 points, skipping rebuild");
             return;
         }
-        
-        // Find the existing GameObject for this segment
+
+        // Try to find existing GameObject
         GameObject existingSegmentGO = null;
         foreach (Transform child in generatedLevelParent.transform)
         {
@@ -375,25 +379,52 @@ public class EndlessLevelGenerator : MonoBehaviour
                 break;
             }
         }
-        
+
+        // ✅ FALLBACK: Recreate missing segment
         if (existingSegmentGO == null)
         {
-            Debug.LogWarning($"Could not find existing segment GameObject for segment {segmentIndex}");
+            Debug.LogWarning($"🚨 Segment {segmentIndex} GameObject missing! Recreating...");
+
+            existingSegmentGO = new GameObject($"LevelSegment_{segmentIndex}");
+            existingSegmentGO.transform.SetParent(generatedLevelParent.transform);
+            existingSegmentGO.layer = groundLayer;
+
+            // Add SplineComponent
+            SplineComponent spline = existingSegmentGO.AddComponent<SplineComponent>();
+            spline.controlPoints = new List<Vector3>(segment);
+            spline.loop = false;
+
+            // Add LevelBuilder
+            LevelBuilder builder = existingSegmentGO.AddComponent<LevelBuilder>();
+            builder.sampleDistance = 1f;
+            builder.simplifyTolerance = 0.1f;
+            builder.alignToWorldRight = false;
+            builder.width = width;
+            builder.bankFactor = bankFactor;
+            builder.colliderMode = LevelBuilder.ColliderMode.BoxSegments;
+            builder.material = levelMaterial;
+            if (physicsMaterial != null)
+                builder.physicsMaterial = physicsMaterial;
+
+            // Generate geometry
+            builder.Generate();
+            SetLayerRecursive(existingSegmentGO, groundLayer);
+
+            Debug.Log($"✅ Fallback: Recreated segment {segmentIndex} with {segment.Count} points");
             return;
         }
-        
-        // Update the spline component with new control points
-        SplineComponent spline = existingSegmentGO.GetComponent<SplineComponent>();
-        if (spline != null)
+
+        // ✅ Normal rebuild path
+        SplineComponent existingSpline = existingSegmentGO.GetComponent<SplineComponent>();
+        if (existingSpline != null)
         {
-            spline.controlPoints = new List<Vector3>(segment);
+            existingSpline.controlPoints = new List<Vector3>(segment);
         }
-        
-        // Regenerate the level geometry
-        LevelBuilder builder = existingSegmentGO.GetComponent<LevelBuilder>();
-        if (builder != null)
+
+        LevelBuilder existingBuilder = existingSegmentGO.GetComponent<LevelBuilder>();
+        if (existingBuilder != null)
         {
-            builder.Generate();
+            existingBuilder.Generate();
             Debug.Log($"🔄 Rebuilt segment {segmentIndex} with {segment.Count} control points");
         }
     }
@@ -441,8 +472,7 @@ public class EndlessLevelGenerator : MonoBehaviour
                 spawnGO.transform.SetParent(splineGO.transform);
 
                 // place it exactly at the first spline point
-                spawnGO.transform.position = segment[0];
-
+                spawnGO.transform.position = segment[0] + new Vector3(10f,10f,0f);
                 // rotate so forward faces the start of the level
                 if (segment.Count > 1)
                     spawnGO.transform.forward = (segment[1] - segment[0]).normalized;
@@ -573,6 +603,7 @@ public class EndlessLevelGenerator : MonoBehaviour
         grindRail.transform.position = gap.startPoint + direction * (length * 0.5f);
         
         Debug.Log($"✅ Created grind rail: {length:F1}m long from {gap.startPoint} to {gap.endPoint}");
+        CreateLava(gap, grindRail.transform);
     }
 
     private Mesh GenerateCylinderMesh(float radius, float length, int segments)
@@ -628,6 +659,35 @@ public class EndlessLevelGenerator : MonoBehaviour
         
         return mesh;
     }
+
+    private void CreateLava(GapInfo gap, Transform parent)
+    {
+        Vector3 centre = (gap.startPoint + gap.endPoint) * 0.5f;
+        Vector3 dir    = (gap.endPoint - gap.startPoint).normalized;
+
+        GameObject lavaGO = GameObject.CreatePrimitive(PrimitiveType.Plane);
+        lavaGO.name       = $"Lava_{gap.startPoint.x:F0}_{gap.endPoint.x:F0}";
+        lavaGO.transform.SetParent(parent, false);
+
+        // 1. position
+        lavaGO.transform.position = centre + Vector3.down * 0.3f;
+
+        // 2. rotation: align local-Z with the gap direction
+        lavaGO.transform.rotation = Quaternion.LookRotation(dir, Vector3.up)
+                                * Quaternion.Euler(0f, 90f, 0f);  // lay it flat in XY plane
+
+        // 3. scale: length × 2-length (Plane default is 10×10, so normalize first)
+        float scaleX = gap.length / 10f;   // localScale.x becomes length
+        float scaleZ = gap.length * 2f / 10f; // localScale.z becomes 2×length
+        lavaGO.transform.localScale = new Vector3(scaleX, 1f, scaleZ);
+
+        // 4. material
+        lavaGO.GetComponent<MeshRenderer>().sharedMaterial = lavaMaterial;
+
+        // 5. no collider needed
+        Destroy(lavaGO.GetComponent<Collider>());
+    }
+
 
     private void GenerateDecorations()
     {
@@ -743,8 +803,11 @@ public class EndlessLevelGenerator : MonoBehaviour
         Mesh quadMesh = GenerateQuadMesh(scale);
         meshFilter.mesh = quadMesh;
         
-        // Position: place at terrain height, with decoration sitting ON ground
-        decoration.transform.position = position + new Vector3(0, scale, 0);
+        // Position: place at terrain height
+        // The quad mesh goes from 0 to 2*scale in Y, so its center is at scale
+        // We want the bottom (y=0 of mesh) to be at the terrain position
+        // So we don't need to offset - just place it directly at the terrain position
+        decoration.transform.position = position;
         
         // Randomly choose tree or rock
         Material[] materials = Random.value > 0.5f ? treeMaterials : rockMaterials;
@@ -801,6 +864,17 @@ public class EndlessLevelGenerator : MonoBehaviour
         }
     }
 
+    public MeshFilter GetSegmentMeshFilter(int segmentIndex)
+{
+    string segmentName = $"LevelSegment_{segmentIndex}";
+    Transform segment = generatedLevelParent.transform.Find(segmentName);
+    if (segment != null)
+    {
+        return segment.GetComponentInChildren<MeshFilter>();
+    }
+    return null;
+}
+
     /// <summary>
     /// Get the current forward progress position (for manager to track)
     /// </summary>
@@ -853,6 +927,122 @@ public class EndlessLevelGenerator : MonoBehaviour
         }
 
         Debug.Log($"[EndlessLevelGenerator] cursor synced to  X={currentX:F2}  Y={currentY:F2}");
+    }
+
+    /// <summary>
+    /// Cleans up segments that the player has completely passed
+    /// Much simpler - just delete segments behind the player
+    /// </summary>
+    public List<GameObject> CleanupPassedSegments(float playerX)
+    {
+        if (generatedLevelParent == null)
+        {
+            return new List<GameObject>();
+        }
+        
+        List<GameObject> destroyedObjects = new List<GameObject>();
+        List<Transform> childrenToDestroy = new List<Transform>();
+        
+        // Find all LevelSegment children and check if player has passed them
+        foreach (Transform child in generatedLevelParent.transform)
+        {
+            if (!child.name.StartsWith("LevelSegment_")) continue;
+            
+            SplineComponent spline = child.GetComponent<SplineComponent>();
+            if (spline != null && spline.controlPoints.Count > 0)
+            {
+                float segmentStartX = spline.controlPoints[0].x;
+                float segmentEndX = spline.controlPoints[spline.controlPoints.Count - 1].x;
+                
+                // Delete segment if player is safely past it (with buffer)
+                float cleanupBuffer = 20f; // Adjust this based on your camera/view distance
+                if (playerX > segmentEndX + cleanupBuffer)
+                {
+                    Debug.Log($"🗑️ Player (X={playerX:F1}) passed segment {child.name} (endX={segmentEndX:F1}) - DESTROYING");
+                    childrenToDestroy.Add(child);
+                    destroyedObjects.Add(child.gameObject);
+                }
+            }
+        }
+        
+        // Destroy the GameObjects
+        foreach (Transform child in childrenToDestroy)
+        {
+            DestroyImmediate(child.gameObject);
+        }
+        
+        // Refresh the active sections list and rebuild tracking
+        if (destroyedObjects.Count > 0)
+        {
+            RebuildSplineSegmentsList();
+            Debug.Log($"✅ Cleaned up {destroyedObjects.Count} passed segments. Remaining: {splineSegments.Count}");
+        }
+        
+        return destroyedObjects;
+    }
+    
+    /// <summary>
+    /// Rebuilds the splineSegments list from existing GameObjects in the scene
+    /// Ensures internal tracking matches scene reality
+    /// </summary>
+    private void RebuildSplineSegmentsList()
+    {
+        if (generatedLevelParent == null) return;
+        
+        splineSegments.Clear();
+        
+        // Collect all LevelSegment children in order
+        List<GameObject> segments = new List<GameObject>();
+        foreach (Transform child in generatedLevelParent.transform)
+        {
+            if (child.name.StartsWith("LevelSegment_"))
+            {
+                segments.Add(child.gameObject);
+            }
+        }
+        
+        // Sort by segment number
+        segments.Sort((a, b) => 
+        {
+            int numA = int.Parse(a.name.Replace("LevelSegment_", ""));
+            int numB = int.Parse(b.name.Replace("LevelSegment_", ""));
+            return numA.CompareTo(numB);
+        });
+        
+        // Rebuild splineSegments from existing GameObjects
+        foreach (GameObject segmentObj in segments)
+        {
+            SplineComponent spline = segmentObj.GetComponent<SplineComponent>();
+            if (spline != null && spline.controlPoints.Count > 0)
+            {
+                splineSegments.Add(new List<Vector3>(spline.controlPoints));
+            }
+        }
+        
+        Debug.Log($"🔄 Rebuilt splineSegments list: {splineSegments.Count} segments from {segments.Count} GameObjects");
+    }
+
+    /// <summary>
+    /// Removes old segments from tracking when they're destroyed by the game manager
+    /// DEPRECATED - Use CleanupOldSegments instead which handles everything
+    /// </summary>
+    public void RemoveSegmentFromTracking(int segmentIndex)
+    {
+        if (segmentIndex >= 0 && segmentIndex < splineSegments.Count)
+        {
+            // Remove the spline segment from our tracking
+            List<Vector3> removedSegment = splineSegments[segmentIndex];
+            
+            // Remove all points from this segment from allControlPoints
+            foreach (Vector3 point in removedSegment)
+            {
+                allControlPoints.Remove(point);
+            }
+            
+            splineSegments.RemoveAt(segmentIndex);
+            
+            Debug.Log($"🗑️ Removed segment {segmentIndex} from tracking. Remaining segments: {splineSegments.Count}");
+        }
     }
 
     public void GenerateAndCreate()

@@ -4,8 +4,10 @@ using Unity.VisualScripting;
 
 /// <summary>
 /// Optimized bat enemy with pooling support, hitboxes, and death animations
+/// Modified to stay in front of fast-moving player (skating game)
+/// Includes terrain following for sloped courses
 /// </summary>
-public class BatEnemy : MonoBehaviour
+public class BatEnemy : MonoBehaviour, IEnemy
 {
     public static event Action<BatEnemy> OnBatDeath;
 
@@ -22,6 +24,13 @@ public class BatEnemy : MonoBehaviour
     public Renderer batRenderer;
     public Transform visualRoot;
     
+    [Header("Terrain Following")]
+    public LayerMask groundLayer;
+    public float hoverHeight = 2f; // Height above ground
+    public float maxRaycastDistance = 20f; // How far to check for ground
+    public float terrainFollowSpeed = 8f; // How fast to adjust to terrain changes
+    public bool debugRaycast = false; // Show raycast in scene view
+    
     // Cached references (WebGL optimization)
     private Transform player;
     private Rigidbody playerRb;
@@ -32,17 +41,28 @@ public class BatEnemy : MonoBehaviour
     private bool isSwooping;
     private bool isDying;
     private MaterialPropertyBlock matProps; // Avoid material instances
+    private float currentGroundHeight; // Cached ground height
     
-    [Header("Formation")]
-    public float formationRadius = 4f; // radius of orbit around player
-    public float formationArcDegrees = 140f; // arc centered on world-right where bats will prefer to stay
-    public float formationHeight = 1.5f; // vertical offset from player
-    public float formationLerp = 4f; // how fast bats move into formation
+    [Header("Formation - Front of Player")]
+    public float formationDistance = 8f; // distance ahead of player
+    public float formationWidth = 6f; // horizontal spread
+    public float formationHeight = 1.5f; // vertical offset from ground
+    public float formationLerp = 3f; // how fast bats move into formation
+    public float velocityPrediction = 0.5f; // how far ahead to predict player position
+
+    [Header("Catch-Up System")]
+    public float catchUpDistance = 40f;      // how far behind before bats boost
+    public float catchUpSpeedMultiplier = 3f; // speed boost
+    public float catchUpHeight = 2f;          // hover height during boost
+
     
     // Death animation
     private float deathTimer;
     private Vector3 originalScale;
     private const float DEATH_DURATION = 0.5f;
+
+    EnemyStats IEnemy.stats => stats;
+
     
     void Awake()
     {
@@ -72,6 +92,8 @@ public class BatEnemy : MonoBehaviour
         isSwooping = false;
         swoopTimer = 0f;
         attackTimer = 0f;
+        currentGroundHeight = cachedTransform.position.y;
+        
         BillboardManager.Register(this.transform);
         // Get player reference from GameManager
         player = GameManager.Instance?.playerController?.transform;
@@ -94,6 +116,9 @@ public class BatEnemy : MonoBehaviour
         Debug.Log($"BatEnemy initialized with player ref: {player != null}. Health: {health}");
         
         EnemyManager.RegisterEnemy(this);
+        
+        // Initial ground check
+        UpdateGroundHeight();
     }
 
     void Update()
@@ -106,8 +131,35 @@ public class BatEnemy : MonoBehaviour
         
         if (player == null) return;
         
+        UpdateGroundHeight();
         CodeBasedAnimation();
         StateMachine();
+    }
+
+    private void UpdateGroundHeight()
+    {
+        // Raycast downward to find ground
+        RaycastHit hit;
+        Vector3 rayStart = cachedTransform.position + Vector3.up * 5f; // Start raycast above current position
+        
+        if (Physics.Raycast(rayStart, Vector3.down, out hit, maxRaycastDistance, groundLayer))
+        {
+            // Smoothly adjust to new ground height
+            float targetHeight = hit.point.y + hoverHeight;
+            currentGroundHeight = Mathf.Lerp(currentGroundHeight, targetHeight, Time.deltaTime * terrainFollowSpeed);
+            
+            if (debugRaycast)
+            {
+                Debug.DrawLine(rayStart, hit.point, Color.green);
+            }
+        }
+        else
+        {
+            if (debugRaycast)
+            {
+                Debug.DrawLine(rayStart, rayStart + Vector3.down * maxRaycastDistance, Color.red);
+            }
+        }
     }
 
     private void StateMachine()
@@ -124,6 +176,8 @@ public class BatEnemy : MonoBehaviour
             isSwooping = true;
             swoopTimer = stats.swoopCooldown;
         }
+        if (CatchUpToPlayer())
+        return; // skip all normal AI until caught up
 
         if (isSwooping)
         {
@@ -135,12 +189,6 @@ public class BatEnemy : MonoBehaviour
         }
     }
 
-    private void IdleFloat()
-    {
-        // Deprecated - now use FollowFormation for positional behaviour.
-        FollowFormation();
-    }
-
     private void FollowFormation()
     {
         // Compute formation positions based on active bats
@@ -150,7 +198,7 @@ public class BatEnemy : MonoBehaviour
         {
             // fallback to simple idle
             Vector3 floatPos = idleCenter;
-            floatPos.y += Mathf.Sin(Time.time * stats.idleFloatSpeed) * stats.idleFloatAmplitude;
+            floatPos.y = currentGroundHeight + Mathf.Sin(Time.time * stats.idleFloatSpeed) * stats.idleFloatAmplitude;
             cachedTransform.position = Vector3.Lerp(cachedTransform.position, floatPos, Time.deltaTime * stats.moveSpeed);
             LookAtPlayerSmooth();
             return;
@@ -159,46 +207,99 @@ public class BatEnemy : MonoBehaviour
         int idx = active.IndexOf(this);
         if (idx < 0) idx = 0;
 
-        // Arc is centered on world right (Vector3.right). We distribute bats along the arc.
-        float arc = Mathf.Clamp(formationArcDegrees, 0f, 360f);
-        float half = arc * 0.5f;
-        float angleDeg = 0f;
+        // PREDICT where player will be based on velocity
+        Vector3 predictedPos = player.position;
+        if (playerRb != null)
+        {
+            predictedPos += playerRb.velocity * velocityPrediction;
+        }
+
+        // Player moves on world right (Vector3.right), so we place enemies AHEAD on that axis
+        Vector3 forwardOffset = Vector3.right * formationDistance;
+
+        // Distribute bats horizontally (forward/back relative to movement direction)
+        // and vertically (up/down)
+        float horizontalSpacing = 0f;
+        float verticalOffset = 0f;
+        
         if (count == 1)
         {
-            angleDeg = 0f;
+            // Single bat: dead center in front
+            horizontalSpacing = 0f;
+            verticalOffset = formationHeight;
         }
         else
         {
-            float step = arc / (count - 1);
-            angleDeg = -half + step * idx; // -half => left-most, +half => right-most (relative to world-right center)
+            // Multiple bats: spread them in a grid pattern
+            int cols = Mathf.CeilToInt(Mathf.Sqrt(count));
+            int row = idx / cols;
+            int col = idx % cols;
+            
+            // Center the grid
+            float colOffset = (col - (cols - 1) * 0.5f) * (formationWidth / cols);
+            float rowOffset = row * 1.5f; // slight depth variation
+            
+            // Horizontal is perpendicular to movement (world forward for lateral spread)
+            horizontalSpacing = colOffset;
+            verticalOffset = formationHeight + rowOffset * 0.5f;
         }
 
-        // Convert angle relative to world-right into a direction on XZ plane
-        Quaternion rot = Quaternion.AngleAxis(angleDeg, Vector3.up);
-        Vector3 dir = rot * Vector3.right; // world-right rotated
-
-        // Lead the formation slightly by player's velocity so bats 'keep up'
-        Vector3 lead = Vector3.zero;
-        if (playerRb != null)
+        // Calculate final position: ahead of player + horizontal spread
+        Vector3 lateralOffset = Vector3.forward * horizontalSpacing;
+        
+        // Use terrain-following height instead of fixed height
+        Vector3 desired = predictedPos + forwardOffset + lateralOffset;
+        
+        // Check ground at desired XZ position
+        RaycastHit hit;
+        float desiredHeight = currentGroundHeight + verticalOffset;
+        if (Physics.Raycast(desired + Vector3.up * 10f, Vector3.down, out hit, 50f, groundLayer))
         {
-            lead = new Vector3(playerRb.velocity.x, 0f, playerRb.velocity.z) * 0.35f;
+            desiredHeight = hit.point.y + hoverHeight + verticalOffset;
         }
+        
+        desired.y = desiredHeight;
 
-        Vector3 desired = player.position + dir * formationRadius + Vector3.up * formationHeight + lead;
-
-        // Smooth move towards formation position
+        // Smooth move towards formation position with faster response for skating speed
         float lerpT = 1f - Mathf.Exp(-formationLerp * Time.deltaTime);
-        cachedTransform.position = Vector3.Lerp(cachedTransform.position, desired, lerpT * (stats.moveSpeed * 0.5f + 0.5f));
+        Vector3 newPos = Vector3.Lerp(
+            cachedTransform.position, 
+            desired, 
+            lerpT * (stats.moveSpeed * 1.5f) // Increased multiplier for fast skating
+        );
+        
+        // Ensure Y position follows terrain smoothly
+        newPos.y = Mathf.Lerp(cachedTransform.position.y, desiredHeight, Time.deltaTime * terrainFollowSpeed);
+        
+        cachedTransform.position = newPos;
 
-        // gentle look at player
+        // Look at player
         LookAtPlayerSmooth();
     }
 
     private void SwoopAttack()
     {
+        // Swoop toward predicted player position
+        Vector3 targetPos = player.position;
+        if (playerRb != null)
+        {
+            targetPos += playerRb.velocity * 0.3f;
+        }
+
+        // Maintain terrain following even during swoop
+        RaycastHit hit;
+        if (Physics.Raycast(targetPos + Vector3.up * 10f, Vector3.down, out hit, 50f, groundLayer))
+        {
+            targetPos.y = hit.point.y + hoverHeight * 0.5f; // Lower hover during attack
+        }
+        else
+        {
+            targetPos.y = currentGroundHeight + hoverHeight * 0.5f;
+        }
+
         cachedTransform.position = Vector3.MoveTowards(
             cachedTransform.position,
-            player.position,
+            targetPos,
             stats.swoopSpeed * Time.deltaTime
         );
 
@@ -233,6 +334,37 @@ public class BatEnemy : MonoBehaviour
             );
         }
     }
+
+    private bool CatchUpToPlayer()
+    {
+        // Check if the bat is far behind the player on the world X axis (player moves right)
+        float dx = player.position.x - cachedTransform.position.x;
+
+        if (dx > catchUpDistance)
+        {
+            // Target = directly behind player
+            Vector3 target = player.position - Vector3.right * 5f;
+
+            // Keep terrain height
+            RaycastHit hit;
+            if (Physics.Raycast(target + Vector3.up * 10f, Vector3.down, out hit, 50f, groundLayer))
+                target.y = hit.point.y + catchUpHeight;
+            else
+                target.y = currentGroundHeight + catchUpHeight;
+
+            cachedTransform.position = Vector3.MoveTowards(
+                cachedTransform.position,
+                target,
+                stats.moveSpeed * catchUpSpeedMultiplier * Time.deltaTime
+            );
+
+            LookAtPlayerSmooth();
+            return true;    // we are catching up (skip normal logic)
+        }
+
+        return false;       // not catching up
+    }
+
 
     private void CodeBasedAnimation()
     {
@@ -309,6 +441,7 @@ public class BatEnemy : MonoBehaviour
         
         OnBatDeath?.Invoke(this);
         EnemyManager.UnregisterEnemy(this);
+        EnemyManager.NotifyDeath(this);
         BillboardManager.Billboards.Remove(this.transform);
         
         // Disable colliders

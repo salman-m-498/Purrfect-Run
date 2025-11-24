@@ -8,7 +8,8 @@ public class EnemyManager : MonoBehaviour
 {
     public static EnemyManager Instance;
 
-    private static List<BatEnemy> enemies = new List<BatEnemy>();
+    private static List<IEnemy> enemies = new List<IEnemy>();
+
 
     void Awake()
     {
@@ -24,7 +25,7 @@ public class EnemyManager : MonoBehaviour
         }
     }
 
-    public static void RegisterEnemy(BatEnemy enemy)
+    public static void RegisterEnemy(IEnemy enemy)
     {
         if (!enemies.Contains(enemy))
         {
@@ -32,7 +33,7 @@ public class EnemyManager : MonoBehaviour
         }
     }
 
-    public static void UnregisterEnemy(BatEnemy enemy)
+    public static void UnregisterEnemy(IEnemy enemy)
     {
         if (enemies.Contains(enemy))
         {
@@ -55,10 +56,13 @@ public class EnemyManager : MonoBehaviour
         enemies.Clear();
     }
 
+    public static event System.Action<IEnemy> OnEnemyDeath;
+    public static void NotifyDeath(IEnemy dead) => OnEnemyDeath?.Invoke(dead);
+
     // WebGL optimization: Get enemies in range without allocating
-    public static List<BatEnemy> GetEnemiesInRange(Vector3 position, float range)
+    public static List<IEnemy> GetEnemiesInRange(Vector3 position, float range)
     {
-        List<BatEnemy> result = new List<BatEnemy>();
+        List<IEnemy> result = new List<IEnemy>();
         float rangeSqr = range * range;
         
         for (int i = 0; i < enemies.Count; i++)
@@ -77,9 +81,9 @@ public class EnemyManager : MonoBehaviour
     }
 
     // Get closest enemy (for targeting)
-    public static BatEnemy GetClosestEnemy(Vector3 position)
+    public static IEnemy GetClosestEnemy(Vector3 position)
     {
-        BatEnemy closest = null;
+        IEnemy closest = null;
         float closestDist = float.MaxValue;
         
         for (int i = 0; i < enemies.Count; i++)
@@ -102,9 +106,9 @@ public class EnemyManager : MonoBehaviour
     /// Return a list of currently active enemies. Allocates a new list.
     /// Use sparingly (e.g. once per frame) to avoid GC pressure.
     /// </summary>
-    public static List<BatEnemy> GetActiveEnemies()
+    public static List<IEnemy> GetActiveEnemies()
     {
-        List<BatEnemy> result = new List<BatEnemy>();
+        List<IEnemy> result = new List<IEnemy>();
         for (int i = 0; i < enemies.Count; i++)
         {
             var e = enemies[i];

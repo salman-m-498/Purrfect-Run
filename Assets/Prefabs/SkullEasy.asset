@@ -10,13 +10,13 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 841e20cbda1152c48a8fd8bfa523e2b2, type: 3}
-  m_Name: BatEasy
+  m_Name: SkullEasy
   m_EditorClassIdentifier: 
   idleFloatSpeed: 1.5
   idleFloatAmplitude: 0.5
-  moveSpeed: 13.87
+  moveSpeed: 6
   swoopSpeed: 12
-  detectRange: 50
+  detectRange: 10
   swoopCooldown: 3
   attackDamage: 10
   attackRange: 1.5

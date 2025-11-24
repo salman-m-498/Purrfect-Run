@@ -107,6 +107,18 @@ MonoBehaviour:
     m_Bits: 256
   batRenderer: {fileID: 5704346707290245666}
   visualRoot: {fileID: 3608305424752180191}
+  groundLayer:
+    serializedVersion: 2
+    m_Bits: 64
+  hoverHeight: 2
+  maxRaycastDistance: 20
+  terrainFollowSpeed: 8
+  debugRaycast: 0
+  formationDistance: 8
+  formationWidth: 6
+  formationHeight: 1.5
+  formationLerp: 3
+  velocityPrediction: 0.5
 --- !u!135 &4852523862857302352
 SphereCollider:
   m_ObjectHideFlags: 0

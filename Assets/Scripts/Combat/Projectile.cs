@@ -86,7 +86,7 @@ public class Projectile : MonoBehaviour
         if (target == null)
         {
             // Try to find any nearby target
-            BatEnemy fallback = EnemyManager.GetClosestEnemy(transform.position);
+            IEnemy fallback = EnemyManager.GetClosestEnemy(transform.position);
             if (fallback != null)
             {
                 target = fallback.transform;
@@ -122,7 +122,7 @@ public class Projectile : MonoBehaviour
             return;
         }
 
-        BatEnemy be = target.GetComponent<BatEnemy>();
+        IEnemy be = target.GetComponent<IEnemy>();
         if (be != null)
         {
             be.TakeDamage(damage);
@@ -133,7 +133,7 @@ public class Projectile : MonoBehaviour
         {
             bouncesRemaining--;
             // find next closest enemy within bounceSearchRadius (excluding current target)
-            BatEnemy next = FindNextBounceTarget(target.position);
+            IEnemy next = FindNextBounceTarget(target.position);
             if (next != null && next.transform != target)
             {
                 target = next.transform;
@@ -145,10 +145,10 @@ public class Projectile : MonoBehaviour
         Return();
     }
 
-    private BatEnemy FindNextBounceTarget(Vector3 fromPos)
+    private IEnemy FindNextBounceTarget(Vector3 fromPos)
     {
         // Use EnemyManager to get closest enemy; if it's the current target, try to find the next by scanning nearby list
-        BatEnemy closest = EnemyManager.GetClosestEnemy(fromPos);
+        IEnemy closest = EnemyManager.GetClosestEnemy(fromPos);
         if (closest == null) return null;
 
         if (closest.transform == target)
@@ -157,11 +157,11 @@ public class Projectile : MonoBehaviour
             var list = typeof(EnemyManager).GetField("enemies", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
             if (list != null)
             {
-                var enemies = list.GetValue(null) as System.Collections.Generic.List<BatEnemy>;
+                var enemies = list.GetValue(null) as System.Collections.Generic.List<IEnemy>;
                 if (enemies != null)
                 {
                     float bestDist = float.MaxValue;
-                    BatEnemy best = null;
+                    IEnemy best = null;
                     for (int i = 0; i < enemies.Count; i++)
                     {
                         var e = enemies[i];

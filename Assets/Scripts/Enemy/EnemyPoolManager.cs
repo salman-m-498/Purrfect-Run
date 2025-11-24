@@ -2,31 +2,36 @@ using UnityEngine;
 using System.Collections.Generic;
 
 /// <summary>
-/// Object pooling for 100+ enemies without lag (WebGL optimized)
+/// Generic object pooling for multiple enemy types (WebGL optimized)
+/// Now supports Bat, Skull, and any future IEnemy implementations
 /// </summary>
 public class EnemyPoolManager : MonoBehaviour
 {
     public static EnemyPoolManager Instance { get; private set; }
 
+    [System.Serializable]
+    public class EnemyPool
+    {
+        public string poolName;
+        public GameObject prefab;
+        public EnemyStats defaultStats;
+        public int initialSize = 30;
+        public int maxSize = 100;
+        
+        [HideInInspector] public Queue<IEnemy> available = new Queue<IEnemy>();
+        [HideInInspector] public HashSet<IEnemy> active = new HashSet<IEnemy>();
+        [HideInInspector] public Transform poolParent;
+    }
+
     [Header("Pool Settings")]
-    public GameObject batPrefab;
-    public EnemyStats defaultBatStats;
-    public int initialPoolSize = 50;
-    public int maxPoolSize = 200;
-    public Transform poolParent;
-    
-    private Queue<BatEnemy> availableEnemies = new Queue<BatEnemy>();
-    private HashSet<BatEnemy> activeEnemies = new HashSet<BatEnemy>();
+    public List<EnemyPool> enemyPools = new List<EnemyPool>();
+    public Transform poolRootParent;
 
     void Awake()
     {
         if (Instance == null)
         {
             Instance = this;
-            
-            // Don't persist between scenes to avoid conflicts with GameManager
-            // Remove if you want persistence across scenes
-            // DontDestroyOnLoad(gameObject);
         }
         else
         {
@@ -34,100 +39,260 @@ public class EnemyPoolManager : MonoBehaviour
             return;
         }
         
-        if (poolParent == null)
+        if (poolRootParent == null)
         {
-            poolParent = new GameObject("Enemy Pool").transform;
-            poolParent.SetParent(transform);
+            poolRootParent = new GameObject("Enemy Pools").transform;
+            poolRootParent.SetParent(transform);
         }
         
-        InitializePool();
+        InitializeAllPools();
     }
 
-    private void InitializePool()
+    private void InitializeAllPools()
     {
-        for (int i = 0; i < initialPoolSize; i++)
+        foreach (var pool in enemyPools)
         {
-            CreateNewEnemy();
+            // Create parent for this enemy type
+            pool.poolParent = new GameObject($"{pool.poolName} Pool").transform;
+            pool.poolParent.SetParent(poolRootParent);
+            
+            // Pre-instantiate enemies
+            for (int i = 0; i < pool.initialSize; i++)
+            {
+                CreateNewEnemy(pool);
+            }
+            
+            Debug.Log($"Pool '{pool.poolName}' initialized with {pool.initialSize} enemies");
         }
-        
-        Debug.Log($"Enemy pool initialized with {initialPoolSize} bats");
     }
 
-    private BatEnemy CreateNewEnemy()
+    private IEnemy CreateNewEnemy(EnemyPool pool)
     {
-        GameObject obj = Instantiate(batPrefab, poolParent);
+        GameObject obj = Instantiate(pool.prefab, pool.poolParent);
         obj.SetActive(false);
         
-        BatEnemy bat = obj.GetComponent<BatEnemy>();
-        if (bat == null)
+        IEnemy enemy = obj.GetComponent<IEnemy>();
+        if (enemy == null)
         {
-            bat = obj.AddComponent<BatEnemy>();
+            Debug.LogError($"Prefab {pool.prefab.name} does not have IEnemy component!");
+            Destroy(obj);
+            return null;
         }
         
-        availableEnemies.Enqueue(bat);
-        return bat;
+        pool.available.Enqueue(enemy);
+        return enemy;
     }
 
-    public BatEnemy SpawnEnemy(Vector3 position, EnemyStats stats = null)
+    // ============================================================
+    // SPAWN BY TYPE
+    // ============================================================
+
+    /// <summary>
+    /// Spawn enemy by pool name (e.g. "Bat", "Skull")
+    /// </summary>
+    public IEnemy SpawnEnemy(string poolName, Vector3 position, EnemyStats statsOverride = null)
     {
-        // Get from pool or create new
-        BatEnemy bat;
-        
-        if (availableEnemies.Count > 0)
+        EnemyPool pool = enemyPools.Find(p => p.poolName == poolName);
+        if (pool == null)
         {
-            bat = availableEnemies.Dequeue();
+            Debug.LogError($"No pool found with name '{poolName}'!");
+            return null;
         }
-        else if (activeEnemies.Count < maxPoolSize)
+        
+        return SpawnFromPool(pool, position, statsOverride);
+    }
+
+    /// <summary>
+    /// Spawn specific enemy type
+    /// </summary>
+    public T SpawnEnemy<T>(Vector3 position, EnemyStats statsOverride = null) where T : MonoBehaviour, IEnemy
+    {
+        // Find pool by component type
+        EnemyPool pool = enemyPools.Find(p => p.prefab.GetComponent<T>() != null);
+        if (pool == null)
         {
-            bat = CreateNewEnemy();
-            bat = availableEnemies.Dequeue(); // Dequeue the newly created enemy from the queue
+            Debug.LogError($"No pool found for enemy type {typeof(T).Name}!");
+            return null;
+        }
+        
+        return SpawnFromPool(pool, position, statsOverride) as T;
+    }
+
+    /// <summary>
+    /// Spawn bat enemy (convenience method for legacy code)
+    /// </summary>
+    public BatEnemy SpawnBat(Vector3 position, EnemyStats statsOverride = null)
+    {
+        return SpawnEnemy<BatEnemy>(position, statsOverride);
+    }
+
+    /// <summary>
+    /// Spawn skull enemy (convenience method)
+    /// </summary>
+    public SkullEnemy SpawnSkull(Vector3 position, EnemyStats statsOverride = null)
+    {
+        return SpawnEnemy<SkullEnemy>(position, statsOverride);
+    }
+
+    // ============================================================
+    // CORE POOLING LOGIC
+    // ============================================================
+
+    private IEnemy SpawnFromPool(EnemyPool pool, Vector3 position, EnemyStats statsOverride)
+    {
+        IEnemy enemy;
+        
+        // Get from pool or create new
+        if (pool.available.Count > 0)
+        {
+            enemy = pool.available.Dequeue();
+        }
+        else if (pool.active.Count < pool.maxSize)
+        {
+            enemy = CreateNewEnemy(pool);
+            if (enemy == null) return null;
+            enemy = pool.available.Dequeue();
         }
         else
         {
-            Debug.LogWarning("Enemy pool at max capacity!");
+            Debug.LogWarning($"Pool '{pool.poolName}' at max capacity ({pool.maxSize})!");
             return null;
         }
         
         // Setup enemy
-        bat.transform.position = position;
-        bat.transform.rotation = Quaternion.identity;
-        bat.gameObject.SetActive(true);
-        bat.Initialize(stats ?? defaultBatStats);
-        bat.ResetForPooling();
+        enemy.transform.position = position;
+        enemy.transform.rotation = Quaternion.identity;
+        enemy.gameObject.SetActive(true);
+        enemy.Initialize(statsOverride ?? pool.defaultStats);
+        enemy.ResetForPooling();
         
-        activeEnemies.Add(bat);
+        pool.active.Add(enemy);
         
-        Debug.Log($"Spawned bat at {position}. Active: {activeEnemies.Count}, Available: {availableEnemies.Count}");
+        Debug.Log($"Spawned {pool.poolName} at {position}. Active: {pool.active.Count}, Available: {pool.available.Count}");
         
-        return bat;
+        return enemy;
     }
 
-    public void ReturnToPool(BatEnemy bat)
+    public void ReturnToPool(IEnemy enemy)
     {
-        if (!activeEnemies.Contains(bat))
+        if (enemy == null || enemy.gameObject == null) return;
+        
+        // Find which pool this enemy belongs to
+        EnemyPool pool = FindPoolForEnemy(enemy);
+        if (pool == null)
+        {
+            Debug.LogWarning($"Could not find pool for enemy {enemy.gameObject.name}");
+            return;
+        }
+        
+        if (!pool.active.Contains(enemy))
             return;
         
-        activeEnemies.Remove(bat);
-        bat.gameObject.SetActive(false);
-        bat.transform.SetParent(poolParent);
-        availableEnemies.Enqueue(bat);
+        pool.active.Remove(enemy);
+        enemy.gameObject.SetActive(false);
+        enemy.transform.SetParent(pool.poolParent);
+        pool.available.Enqueue(enemy);
     }
+
+    // Legacy method for BatEnemy - calls generic version
+    public void ReturnToPool(BatEnemy bat)
+    {
+        ReturnToPool(bat as IEnemy);
+    }
+
+    // Method for SkullEnemy - calls generic version
+    public void ReturnToPool(SkullEnemy skull)
+    {
+        ReturnToPool(skull as IEnemy);
+    }
+
+    private EnemyPool FindPoolForEnemy(IEnemy enemy)
+    {
+        foreach (var pool in enemyPools)
+        {
+            if (pool.active.Contains(enemy) || pool.available.Contains(enemy))
+                return pool;
+        }
+        return null;
+    }
+
+    // ============================================================
+    // MANAGEMENT
+    // ============================================================
 
     public void ClearAllEnemies()
     {
-        List<BatEnemy> toReturn = new List<BatEnemy>(activeEnemies);
-        foreach (var bat in toReturn)
+        foreach (var pool in enemyPools)
         {
-            ReturnToPool(bat);
+            List<IEnemy> toReturn = new List<IEnemy>(pool.active);
+            foreach (var enemy in toReturn)
+            {
+                ReturnToPool(enemy);
+            }
         }
     }
 
-    public int GetActiveCount() => activeEnemies.Count;
-    public int GetAvailableCount() => availableEnemies.Count;
-    
-    // Integration with your GameManager
+    public void ClearEnemiesByType(string poolName)
+    {
+        EnemyPool pool = enemyPools.Find(p => p.poolName == poolName);
+        if (pool != null)
+        {
+            List<IEnemy> toReturn = new List<IEnemy>(pool.active);
+            foreach (var enemy in toReturn)
+            {
+                ReturnToPool(enemy);
+            }
+        }
+    }
+
+    // ============================================================
+    // STATS & QUERIES
+    // ============================================================
+
+    public int GetTotalActiveCount()
+    {
+        int total = 0;
+        foreach (var pool in enemyPools)
+            total += pool.active.Count;
+        return total;
+    }
+
+    public int GetActiveCount(string poolName)
+    {
+        EnemyPool pool = enemyPools.Find(p => p.poolName == poolName);
+        return pool?.active.Count ?? 0;
+    }
+
+    public int GetAvailableCount(string poolName)
+    {
+        EnemyPool pool = enemyPools.Find(p => p.poolName == poolName);
+        return pool?.available.Count ?? 0;
+    }
+
+    public Dictionary<string, int> GetAllPoolStats()
+    {
+        Dictionary<string, int> stats = new Dictionary<string, int>();
+        foreach (var pool in enemyPools)
+        {
+            stats[pool.poolName] = pool.active.Count;
+        }
+        return stats;
+    }
+
     void OnDestroy()
     {
         ClearAllEnemies();
     }
+
+#if UNITY_EDITOR
+    // Editor debug info
+    [ContextMenu("Print Pool Status")]
+    private void PrintPoolStatus()
+    {
+        foreach (var pool in enemyPools)
+        {
+            Debug.Log($"Pool '{pool.poolName}': Active={pool.active.Count}, Available={pool.available.Count}, Max={pool.maxSize}");
+        }
+    }
+#endif
 }

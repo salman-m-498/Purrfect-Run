@@ -22,7 +22,6 @@ public class EndlessGameManager : MonoBehaviour
     [Header("Endless Level Generation")]
     public EndlessLevelGenerator levelGenerator;
     public float levelCheckDistance = 50f; // How far ahead to check for new sections
-    public float levelCleanupDistance = 100f; // How far behind to destroy sections
     public int sectionsToPregenerate = 3; // Keep this many sections ahead generated
 
     [Header("Enemy Waves")]
@@ -256,9 +255,6 @@ public class EndlessGameManager : MonoBehaviour
     {
         if (playerController == null || levelGenerator == null || currentLevelParent == null) 
         {
-            if (playerController == null) Debug.LogWarning("❌ playerController is null");
-            if (levelGenerator == null) Debug.LogWarning("❌ levelGenerator is null");
-            if (currentLevelParent == null) Debug.LogWarning("❌ currentLevelParent is null");
             return;
         }
 
@@ -270,12 +266,11 @@ public class EndlessGameManager : MonoBehaviour
         // Generate new sections if player is getting close to the end of generated content
         if (playerX + levelCheckDistance > generationProgressX)
         {
-            Debug.Log($"🏗️ Player at X={playerX:F1}, generation at X={generationProgressX:F1}. Generating ahead...");
             GenerateNewLevelSectionsUsingGenerator();
         }
 
-        // Cleanup old sections that are far behind the player
-        CleanupOldSections(playerX);
+        // Cleanup segments that player has completely passed
+        CleanupPassedSegments(playerX);
     }
 
     private void GenerateNewLevelSectionsUsingGenerator()
@@ -302,30 +297,23 @@ public class EndlessGameManager : MonoBehaviour
         Debug.Log($"✅ Generated {sectionsToPregenerate} new sections. Total segments: {activeLevelSections.Count} (was {previousCount}). Progress: X={afterProgress:F1} (was {beforeProgress:F1})");
     }
 
-    private void CleanupOldSections(float playerX)
+    private void CleanupPassedSegments(float playerX)
     {
-        // Cleanup old sections that are far behind the player
-        for (int i = activeLevelSections.Count - 1; i >= 0; i--)
+        if (levelGenerator == null) return;
+        
+        // Simple: delete any segment the player has completely passed
+        List<GameObject> destroyedSegments = levelGenerator.CleanupPassedSegments(playerX);
+        
+        if (destroyedSegments.Count > 0)
         {
-            if (activeLevelSections[i] == null)
+            // Refresh the active sections list
+            activeLevelSections.Clear();
+            if (currentLevelParent != null)
             {
-                activeLevelSections.RemoveAt(i);
-                continue;
-            }
-
-            // Get the leftmost point of this section to determine its position
-            SplineComponent spline = activeLevelSections[i].GetComponent<SplineComponent>();
-            if (spline != null && spline.controlPoints.Count > 0)
-            {
-                float sectionStartX = spline.controlPoints[0].x;
-                float sectionEndX = spline.controlPoints[spline.controlPoints.Count - 1].x;
-                
-                // Only destroy if the END of the section is behind the cleanup distance
-                if (sectionEndX < playerX - levelCleanupDistance)
+                LevelBuilder[] levelSegments = currentLevelParent.GetComponentsInChildren<LevelBuilder>();
+                foreach (var builder in levelSegments)
                 {
-                    Debug.Log($"🧹 Destroying level section (X={sectionStartX:F1} to {sectionEndX:F1}), player at X={playerX:F1}");
-                    Destroy(activeLevelSections[i]);
-                    activeLevelSections.RemoveAt(i);
+                    activeLevelSections.Add(builder.gameObject);
                 }
             }
         }
@@ -392,10 +380,8 @@ public class EndlessGameManager : MonoBehaviour
             WaveController.WaveConfig config = new WaveController.WaveConfig
             {
                 waveNumber = waveNumber,
-                enemyCount = enemyCount,
                 spawnInterval = Mathf.Max(0.2f, spawnInterval),
                 spawnRadius = 20f,
-                enemyStats = null // Use default
             };
             waveController.predefinedWaves.Add(config);
         }
@@ -504,14 +490,6 @@ public class EndlessGameManager : MonoBehaviour
                 new Vector3(checkX, playerPos.y + 5, 0)
             );
         }
-        
-        // Draw cleanup distance
-        Gizmos.color = Color.red;
-        float cleanupX = playerPos.x - levelCleanupDistance;
-        Gizmos.DrawLine(
-            new Vector3(cleanupX, playerPos.y - 5, 0),
-            new Vector3(cleanupX, playerPos.y + 5, 0)
-        );
     }
 #endif
 }
