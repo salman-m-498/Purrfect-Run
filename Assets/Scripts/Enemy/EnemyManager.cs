@@ -45,16 +45,69 @@ public class EnemyManager : MonoBehaviour
 
     public static void KillAll()
     {
+        Debug.Log($"EnemyManager: Killing all {enemies.Count} enemies");
+        
+        // Create a copy of the list to avoid modification during iteration
+        List<IEnemy> enemiesToKill = new List<IEnemy>(enemies);
+        
         // Use pooling instead of destroying
-        for (int i = enemies.Count - 1; i >= 0; i--)
+        for (int i = enemiesToKill.Count - 1; i >= 0; i--)
         {
-            if (enemies[i] != null)
+            if (enemiesToKill[i] != null)
             {
-                enemies[i].Die();
+                try
+                {
+                    enemiesToKill[i].Die();
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogWarning($"Error killing enemy: {e.Message}");
+                }
             }
         }
+        
+        // Clear the main list
         enemies.Clear();
+        
+        Debug.Log("✅ All enemies killed and list cleared");
     }
+
+    // Also add this helper method to check if system is ready
+    public static bool IsReady()
+    {
+        return Instance != null;
+    }
+
+    // Add this to help debug enemy spawning issues
+    public static void LogEnemyStatus()
+    {
+        if (Instance == null)
+        {
+            Debug.LogWarning("EnemyManager instance is NULL!");
+            return;
+        }
+        
+        Debug.Log($"EnemyManager Status: {enemies.Count} total enemies registered");
+        
+        int activeCount = 0;
+        int inactiveCount = 0;
+        
+        foreach (var enemy in enemies)
+        {
+            if (enemy != null)
+            {
+                if (enemy.gameObject.activeSelf)
+                    activeCount++;
+                else
+                    inactiveCount++;
+            }
+        }
+        
+        Debug.Log($"  - Active: {activeCount}");
+        Debug.Log($"  - Inactive: {inactiveCount}");
+        Debug.Log($"  - Null: {enemies.Count - activeCount - inactiveCount}");
+    }
+
 
     public static event System.Action<IEnemy> OnEnemyDeath;
     public static void NotifyDeath(IEnemy dead) => OnEnemyDeath?.Invoke(dead);

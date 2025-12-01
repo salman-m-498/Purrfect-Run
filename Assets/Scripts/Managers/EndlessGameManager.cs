@@ -2,13 +2,11 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using System.Collections;
 using System.Collections.Generic;
+using UnityEngine.EventSystems;
+
 
 /// <summary>
-/// EndlessGameManager - Manages truly endless gameplay with:
-/// - Infinite level generation with dynamic section culling
-/// - Auto-spawning enemy waves that scale with progression
-/// - Loss conditions: fall off level OR die to enemies
-/// - Continuous difficulty scaling
+/// EndlessGameManager - Manages truly endless gameplay with pause support
 /// </summary>
 public class EndlessGameManager : MonoBehaviour
 {
@@ -21,18 +19,18 @@ public class EndlessGameManager : MonoBehaviour
 
     [Header("Endless Level Generation")]
     public EndlessLevelGenerator levelGenerator;
-    public float levelCheckDistance = 50f; // How far ahead to check for new sections
-    public int sectionsToPregenerate = 3; // Keep this many sections ahead generated
+    public float levelCheckDistance = 50f;
+    public int sectionsToPregenerate = 3;
 
     [Header("Enemy Waves")]
     public WaveController waveController;
-    public float waveStartDelay = 3f; // Delay before first wave starts
-    public int baseWaveEnemyCount = 3; // Enemies in wave 1
-    public float baseWaveInterval = 2f; // Time between waves
-    public float waveScalingPerDistance = 0.05f; // How much difficulty scales per unit traveled
+    public float waveStartDelay = 3f;
+    public int baseWaveEnemyCount = 3;
+    public float baseWaveInterval = 2f;
+    public float waveScalingPerDistance = 0.05f;
 
     [Header("Difficulty Scaling")]
-    public float progressionDistance = 0f; // Total distance traveled
+    public float progressionDistance = 0f;
     public float currentDifficultyMultiplier = 1f;
     public float maxDifficultyMultiplier = 5f;
 
@@ -48,8 +46,8 @@ public class EndlessGameManager : MonoBehaviour
     public DollyCam cam;
 
     [Header("Loss Conditions")]
-    public float fallDeathHeight = -20f; // Y position below which player dies
-    public float outOfBoundsZDistance = 10f; // How far from Z=0 before falling off
+    public float fallDeathHeight = -20f;
+    public float outOfBoundsZDistance = 10f;
 
     private GameObject currentLevelParent;
     private List<GameObject> activeLevelSections = new List<GameObject>();
@@ -57,9 +55,8 @@ public class EndlessGameManager : MonoBehaviour
     private Coroutine waveCoroutine;
     private bool gameActive = false;
 
-    // Events
-    public System.Action<float> OnProgressionUpdate; // distance
-    public System.Action<float> OnDifficultyUpdate; // multiplier
+    public System.Action<float> OnProgressionUpdate;
+    public System.Action<float> OnDifficultyUpdate;
     public System.Action<EndlessGameState> OnGameStateChanged;
 
     void Awake()
@@ -87,7 +84,12 @@ public class EndlessGameManager : MonoBehaviour
 
     void Update()
     {
-        // Debug state changes
+        // Don't update gameplay if paused
+        if (PauseManager.Instance != null && PauseManager.Instance.IsPaused)
+        {
+            return;
+        }
+
         if (currentState == EndlessGameState.Playing && !gameActive)
         {
             Debug.LogWarning("⚠️ State is Playing but gameActive is false!");
@@ -98,14 +100,77 @@ public class EndlessGameManager : MonoBehaviour
             return;
         }
 
-        // Check loss conditions
+        // Handle ESC key for pause menu
+        if (Input.GetKeyDown(KeyCode.Escape))
+        {
+            TogglePause();
+        }
+
+        if (waveController != null && uiManager != null)
+        {
+            int wave = waveController.GetCurrentWave();
+            int left = waveController.GetEnemiesRemaining();
+            uiManager.UpdateWaveHUD(wave, left);
+        }
+
         CheckLossConditions();
-
-        // Update level generation
         UpdateLevelGeneration();
-
-        // Update progression metrics
         UpdateProgression();
+    }
+
+    // ============================================================
+    // PAUSE FUNCTIONALITY
+    // ============================================================
+
+    public void TogglePause()
+    {
+        if (currentState != EndlessGameState.Playing)
+        {
+            return; // Can't pause if not playing
+        }
+
+        if (PauseManager.Instance == null)
+        {
+            Debug.LogError("PauseManager.Instance is null!");
+            return;
+        }
+
+        if (PauseManager.Instance.IsPaused)
+        {
+            ResumeGame();
+        }
+        else
+        {
+            PauseGame();
+        }
+    }
+
+    public void PauseGame()
+    {
+        if (currentState != EndlessGameState.Playing) return;
+
+        PauseManager.Instance?.Pause();
+        UnlockCursor();
+        
+        if (uiManager != null)
+        {
+            uiManager.ShowPauseMenu();
+        }
+
+        Debug.Log("🎮 Game Paused");
+    }
+
+    public void ResumeGame()
+    {
+        PauseManager.Instance?.Resume();
+        LockCursor();
+        
+        if (uiManager != null)
+        {
+            uiManager.HidePauseMenu();
+        }
+
+        Debug.Log("🎮 Game Resumed");
     }
 
     // ============================================================
@@ -115,6 +180,21 @@ public class EndlessGameManager : MonoBehaviour
     public void StartEndlessGame()
     {
         Debug.Log("🎮 StartEndlessGame() called!");
+        ClearUIFocus();
+        LockCursor();
+        
+        // CRITICAL: Reset Time.timeScale and clear any pause state
+        Time.timeScale = 1f;
+        if (PauseManager.Instance != null)
+        {
+            PauseManager.Instance.ForceResumeAll();
+        }
+        
+        // Stop any previous music before starting new music
+        if (AudioManager.Instance != null)
+        {
+            AudioManager.Instance.StopMusic();
+        }
         
         gameActive = true;
         currentState = EndlessGameState.Playing;
@@ -122,26 +202,27 @@ public class EndlessGameManager : MonoBehaviour
         currentDifficultyMultiplier = 1f;
         waveNumber = 0;
 
-        // Make sure the very first level chunk exists
-        if (levelGenerator != null && !GameObject.Find("GeneratedLevel"))
-            levelGenerator.GenerateEndlessLevel();   // or GenerateAndCreate()
+        if (EnemyPoolManager.Instance != null)
+        {
+            EnemyPoolManager.Instance.ClearAllEnemies();
+        }
+        
+        EnemyManager.KillAll();
 
-        // Get the already-generated level from the scene
-        // The EndlessLevelGenerator should have already created "GeneratedLevel" parent
+        if (levelGenerator != null && !GameObject.Find("GeneratedLevel"))
+            levelGenerator.GenerateEndlessLevel();
+
         currentLevelParent = GameObject.Find("GeneratedLevel");
         Debug.Log($"🔍 Looking for GeneratedLevel... Found: {(currentLevelParent != null ? "✅ YES" : "❌ NO")}");
         
         if (currentLevelParent == null)
         {
-            Debug.LogError("❌ GeneratedLevel not found in scene! Make sure EndlessLevelGenerator has been run and level is in the scene.");
+            Debug.LogError("❌ GeneratedLevel not found in scene!");
             return;
         }
 
-        // guarantee cursor is in the right place before we ever ask for more
         levelGenerator.SyncCursorToRightmostPoint();
 
-        // Collect all existing level segments (LevelSegment_0, LevelSegment_1, etc.)
-        // These were created by EndlessLevelGenerator
         activeLevelSections.Clear();
         LevelBuilder[] levelSegments = currentLevelParent.GetComponentsInChildren<LevelBuilder>();
         foreach (var builder in levelSegments)
@@ -151,7 +232,6 @@ public class EndlessGameManager : MonoBehaviour
         
         Debug.Log($"🔍 Collected {activeLevelSections.Count} existing level segments from scene.");
 
-        // Initialize player
         if (playerController != null)
         {
             playerController.Initialize(gameManager ?? FindObjectOfType<GameManager>());
@@ -164,53 +244,143 @@ public class EndlessGameManager : MonoBehaviour
             }
         }
 
-        // Initialize score system
         if (scoreSystem != null)
         {
             scoreSystem.ResetRunScore();
         }
 
-        // Start UI
         if (uiManager != null)
         {
             uiManager.ShowGameplayUI();
+            uiManager.HidePauseMenu(); // Make sure pause menu is hidden at start
         }
 
-        // Start waves after delay
+        TutorialSystem tutorialSystem = FindObjectOfType<TutorialSystem>();
+        if (tutorialSystem != null)
+        {
+            tutorialSystem.StartTutorial();
+        }
+
+        if (waveController != null)
+        {
+            waveController.StopWave();
+            waveController.currentWave = 0;
+            waveController.waveActive = false;
+            waveController.enemiesSpawned = 0;
+            waveController.enemiesAlive = 0;
+            waveController.enemiesKilled = 0;
+            
+            Debug.Log("✅ WaveController reset for new run");
+        }
+
         if (waveCoroutine != null)
             StopCoroutine(waveCoroutine);
         waveCoroutine = StartCoroutine(StartWavesAfterDelay(waveStartDelay));
 
         OnGameStateChanged?.Invoke(currentState);
+
+        // Play gameplay music AFTER stopping any previous music
+        if (AudioManager.Instance != null)
+        {
+            Debug.Log("🎵 StartEndlessGame: About to play Music_Gameplay");
+            AudioManager.Instance.PlayMusic(SoundID.Music_Gameplay);
+            Debug.Log("🎵 StartEndlessGame: Music_Gameplay play command sent");
+        }
+        else
+        {
+            Debug.LogError("🎵 StartEndlessGame: AudioManager.Instance is NULL!");
+        }
+        
+        Debug.Log("🎮 StartEndlessGame() complete - waves will start soon");
     }
 
     public void EndGame(string reason)
     {
+        Debug.Log($"🎮 EndGame() called! Reason: {reason}\nStack Trace: {System.Environment.StackTrace}");
+        
         gameActive = false;
         currentState = EndlessGameState.GameOver;
 
-        // Stop waves
+        // Make sure pause menu is hidden
+        if (uiManager != null)
+        {
+            uiManager.HidePauseMenu();
+        }
+
         if (waveController != null)
             waveController.StopWave();
 
-        // Freeze gameplay
-        Time.timeScale = 0f;
+        int finalScore = scoreSystem != null ? scoreSystem.GetTotalRunScore() : 0;
+        int coinsEarned = (int)(progressionDistance * 10);
+        float timePlayed = Time.timeSinceLevelLoad;
 
-        // Show game over UI
-        if (uiManager != null)
+        if (GameManager.Instance != null)
         {
-            GameOverData data = new GameOverData
+            PlayerData playerData = GameManager.Instance.GetPlayerData();
+            if (playerData != null)
             {
-                victory = false,
-                roundsCompleted = 0,
-                totalScore = scoreSystem != null ? scoreSystem.GetTotalRunScore() : 0,
-                coinsEarned = (int)(progressionDistance * 10), // Coins based on distance
-                runTime = Time.timeSinceLevelLoad
-            };
-            uiManager.ShowGameOver(data);
+                playerData.UpdateHighScore(finalScore);
+                playerData.AddLifetimeCoins(coinsEarned);
+                playerData.totalRuns++;
+                playerData.SaveToPlayerPrefs();
+            }
         }
 
-        Debug.Log($"💀 GAME OVER - Reason: {reason}\nDistance: {progressionDistance:F1}m | Score: {scoreSystem?.GetTotalRunScore() ?? 0}");
+        // Stop current music before playing game over music
+        if (AudioManager.Instance != null)
+        {
+            AudioManager.Instance.StopMusic();
+        }
+
+        Debug.Log($"GAME OVER - Reason: {reason}\nDistance: {progressionDistance:F1}m | Score: {finalScore}");
+        
+        bool defeat = reason.Contains("Fell") || reason.Contains("Health") || reason.Contains("track");
+        
+        if (AudioManager.Instance != null)
+        {
+            if (defeat)
+                AudioManager.Instance.PlayMusic(SoundID.Music_GameOver);
+            else
+                AudioManager.Instance.PlayMusic(SoundID.Music_Gameplay);
+        }
+
+        Vector3 playerPos = playerController != null 
+            ? playerController.transform.position 
+            : Vector3.zero;
+        
+        if (CircularTransition.Instance != null)
+        {
+            StartCoroutine(CircularTransition.Instance.ZoomToBlack(playerPos, () =>
+            {
+                Time.timeScale = 0f;
+                
+                if (EndlessGameOverUI.Instance != null)
+                {
+                    EndlessGameOverUI.Instance.ShowGameOver(
+                        reason,
+                        progressionDistance,
+                        finalScore,
+                        coinsEarned,
+                        timePlayed
+                    );
+                }
+            }));
+        }
+        else
+        {
+            Time.timeScale = 0f;
+            
+            if (EndlessGameOverUI.Instance != null)
+            {
+                EndlessGameOverUI.Instance.ShowGameOver(
+                    reason,
+                    progressionDistance,
+                    finalScore,
+                    coinsEarned,
+                    timePlayed
+                );
+            }
+        }
 
         OnGameStateChanged?.Invoke(currentState);
     }
@@ -225,21 +395,18 @@ public class EndlessGameManager : MonoBehaviour
 
         Vector3 playerPos = playerController.transform.position;
 
-        // Loss 1: Fall off the level (too far below)
         if (playerPos.y < fallDeathHeight)
         {
             EndGame("Fell off the level!");
             return;
         }
 
-        // Loss 2: Wander off the Z=0 plane
         if (Mathf.Abs(playerPos.z) > outOfBoundsZDistance)
         {
             EndGame("Wandered off the track!");
             return;
         }
 
-        // Loss 3: Health depleted (if using health system)
         if (gameManager?.healthSystem != null && gameManager.healthSystem.GetCurrentHealth() <= 0)
         {
             EndGame("Health depleted!");
@@ -259,17 +426,13 @@ public class EndlessGameManager : MonoBehaviour
         }
 
         float playerX = playerController.transform.position.x;
-        
-        // Get the current generation progress from the generator
         float generationProgressX = levelGenerator.GetCurrentGenerationX();
 
-        // Generate new sections if player is getting close to the end of generated content
         if (playerX + levelCheckDistance > generationProgressX)
         {
             GenerateNewLevelSectionsUsingGenerator();
         }
 
-        // Cleanup segments that player has completely passed
         CleanupPassedSegments(playerX);
     }
 
@@ -279,10 +442,8 @@ public class EndlessGameManager : MonoBehaviour
         
         float beforeProgress = levelGenerator.GetCurrentGenerationX();
         
-        // Use incremental generation to add new sections without clearing
         levelGenerator.GenerateAdditionalSections(sectionsToPregenerate);
         
-        // Refresh the list of active sections
         int previousCount = activeLevelSections.Count;
         activeLevelSections.Clear();
         
@@ -293,20 +454,20 @@ public class EndlessGameManager : MonoBehaviour
         }
         
         float afterProgress = levelGenerator.GetCurrentGenerationX();
+        float lowestLevelY = GetLowestLevelY();
+        fallDeathHeight = lowestLevelY - 20f;
         
-        Debug.Log($"✅ Generated {sectionsToPregenerate} new sections. Total segments: {activeLevelSections.Count} (was {previousCount}). Progress: X={afterProgress:F1} (was {beforeProgress:F1})");
+        Debug.Log($"Generated {sectionsToPregenerate} new sections. Total segments: {activeLevelSections.Count} (was {previousCount}). Progress: X={afterProgress:F1} (was {beforeProgress:F1})");
     }
 
     private void CleanupPassedSegments(float playerX)
     {
         if (levelGenerator == null) return;
         
-        // Simple: delete any segment the player has completely passed
         List<GameObject> destroyedSegments = levelGenerator.CleanupPassedSegments(playerX);
         
         if (destroyedSegments.Count > 0)
         {
-            // Refresh the active sections list
             activeLevelSections.Clear();
             if (currentLevelParent != null)
             {
@@ -334,14 +495,12 @@ public class EndlessGameManager : MonoBehaviour
             float distanceTraveled = newDistance - progressionDistance;
             progressionDistance = newDistance;
 
-            // Add distance-based score
             if (scoreSystem != null)
             {
                 scoreSystem.AddScore((int)(distanceTraveled * scorePerMeterTraveled));
             }
         }
 
-        // Update difficulty
         float newDifficulty = 1f + (progressionDistance * waveScalingPerDistance);
         currentDifficultyMultiplier = Mathf.Min(newDifficulty, maxDifficultyMultiplier);
 
@@ -369,14 +528,11 @@ public class EndlessGameManager : MonoBehaviour
             return;
         }
 
-        // Scale enemies based on difficulty
         int enemyCount = (int)(baseWaveEnemyCount * currentDifficultyMultiplier);
         float spawnInterval = baseWaveInterval / currentDifficultyMultiplier;
 
-        // Modify wave controller settings
         if (waveController.predefinedWaves.Count == 0)
         {
-            // Create wave config on the fly
             WaveController.WaveConfig config = new WaveController.WaveConfig
             {
                 waveNumber = waveNumber,
@@ -386,24 +542,20 @@ public class EndlessGameManager : MonoBehaviour
             waveController.predefinedWaves.Add(config);
         }
 
-        // Start wave
         waveController.StartWave(waveNumber);
 
-        Debug.Log($"🌊 Wave {waveNumber} started: {enemyCount} enemies (difficulty: {currentDifficultyMultiplier:F1}x)");
+        Debug.Log($"Wave {waveNumber} started: {enemyCount} enemies (difficulty: {currentDifficultyMultiplier:F1}x)");
 
-        // Schedule next wave after current one ends
         StartCoroutine(ScheduleNextWave());
     }
 
     private IEnumerator ScheduleNextWave()
     {
-        // Wait for current wave to complete
         while (waveController.waveActive)
         {
             yield return new WaitForSeconds(0.5f);
         }
 
-        // Wait before starting next wave
         yield return new WaitForSeconds(2f);
 
         if (gameActive)
@@ -439,13 +591,101 @@ public class EndlessGameManager : MonoBehaviour
     public void ReturnToMenu()
     {
         Time.timeScale = 1f;
+        if (PauseManager.Instance != null)
+        {
+            PauseManager.Instance.ForceResumeAll();
+        }
+        
+        // Stop music before returning to menu
+        if (AudioManager.Instance != null)
+        {
+            AudioManager.Instance.StopMusic();
+        }
+        
         currentState = EndlessGameState.Menu;
         SceneManager.LoadScene(SceneManager.GetActiveScene().name);
     }
 
     // ============================================================
-    // DEBUG
+    // Cursor Functions (WebGL-safe)
     // ============================================================
+
+    void LockCursor()
+    {
+    #if UNITY_WEBGL && !UNITY_EDITOR
+        // WebGL: do NOT hide or lock cursor
+        Cursor.lockState = CursorLockMode.None;
+        Cursor.visible = true;
+
+        // Force browser focus so keyboard works without holding mouse
+        Application.ExternalEval("window.focus();");
+    #else
+        // Desktop: Confined is perfect for drag-based gameplay
+        Cursor.lockState = CursorLockMode.Confined;
+        Cursor.visible = true;
+    #endif
+    }
+
+    void UnlockCursor()
+    {
+        Cursor.lockState = CursorLockMode.None;
+        Cursor.visible = true;
+    }
+    void ClearUIFocus()
+    {
+        EventSystem.current?.SetSelectedGameObject(null);
+    }
+
+
+
+
+    // ============================================================
+    // DYNAMIC FALL-HEIGHT
+    // ============================================================
+
+    private float GetLowestLevelY()
+    {
+        float lowest = float.MaxValue;
+        bool found = false;
+
+        foreach (GameObject segGo in activeLevelSections)
+        {
+            if (segGo == null) continue;
+
+            lowest = Mathf.Min(lowest, GetLowestYInGameObject(segGo));
+
+            foreach (Transform child in segGo.transform)
+            {
+                lowest = Mathf.Min(lowest, GetLowestYInGameObject(child.gameObject));
+            }
+            found = true;
+        }
+
+        return found ? lowest : -100f;
+    }
+
+    private float GetLowestYInGameObject(GameObject go)
+    {
+        float minY = float.MaxValue;
+
+        MeshFilter mf = go.GetComponent<MeshFilter>();
+        if (mf != null && mf.sharedMesh != null)
+        {
+            Vector3[] verts = mf.sharedMesh.vertices;
+            foreach (Vector3 v in verts)
+                minY = Mathf.Min(minY, go.transform.TransformPoint(v).y);
+        }
+
+        MeshCollider mc = go.GetComponent<MeshCollider>();
+        if (mc != null && mc.sharedMesh != null)
+        {
+            Vector3[] verts = mc.sharedMesh.vertices;
+            foreach (Vector3 v in verts)
+                minY = Mathf.Min(minY, go.transform.TransformPoint(v).y);
+        }
+
+        return minY;
+    }
 
 #if UNITY_EDITOR
     private void OnDrawGizmos()
@@ -454,14 +694,12 @@ public class EndlessGameManager : MonoBehaviour
 
         Vector3 playerPos = playerController.transform.position;
 
-        // Draw fall threshold
         Gizmos.color = Color.red;
         Gizmos.DrawLine(
             new Vector3(playerPos.x - 50, fallDeathHeight, 0), 
             new Vector3(playerPos.x + 50, fallDeathHeight, 0)
         );
 
-        // Draw Z bounds
         Gizmos.color = Color.yellow;
         Gizmos.DrawLine(
             playerPos + Vector3.forward * outOfBoundsZDistance + Vector3.left * 20,
@@ -472,7 +710,6 @@ public class EndlessGameManager : MonoBehaviour
             playerPos - Vector3.forward * outOfBoundsZDistance + Vector3.right * 20
         );
         
-        // Draw generation trigger distance
         if (levelGenerator != null)
         {
             float generationX = levelGenerator.GetCurrentGenerationX();
@@ -482,7 +719,6 @@ public class EndlessGameManager : MonoBehaviour
                 new Vector3(generationX, playerPos.y + 10, 0)
             );
             
-            // Draw check distance
             Gizmos.color = Color.green;
             float checkX = playerPos.x + levelCheckDistance;
             Gizmos.DrawLine(

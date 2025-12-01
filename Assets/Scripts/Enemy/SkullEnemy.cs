@@ -206,6 +206,7 @@ public float jawLerpSpeed = 8f;
         activeSwirl.transform.localScale = Vector3.one * Mathf.Lerp(0f, 1f, t);
         activeSwirl.transform.Rotate(0f, 0f, -200f * Time.deltaTime);
         BillboardManager.Billboards.Add(activeSwirl.transform);
+        AudioManager.Instance.PlaySFX(SoundID.Enemy_Attack_Skull);
     }
 
 

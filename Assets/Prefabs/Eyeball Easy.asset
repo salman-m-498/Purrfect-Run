@@ -21,7 +21,7 @@ MonoBehaviour:
   attackDamage: 30
   attackRange: 80
   attackCooldown: 1
-  maxHealth: 80
+  maxHealth: 200
   flapSpeed: 20
   flapAmplitude: 0.2
   killScore: 100

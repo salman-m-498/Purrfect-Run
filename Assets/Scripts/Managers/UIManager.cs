@@ -4,6 +4,7 @@ using TMPro;
 using System.Collections;
 using System.Collections.Generic;
 using System;
+using UnityEngine.SceneManagement;
 
 /// <summary>
 /// Enhanced UIManager handles all player-facing UI and visual feedback:
@@ -64,6 +65,10 @@ public class UIManager : MonoBehaviour
     public TMP_Text tricksCountText;
     public TMP_Text perfectLandingsText;
     public TMP_Text biggestComboText;
+
+    [Header("Chest Reward")]
+    public GameObject chestRewardPrefab;  // ← This references the GAMEOBJECT
+    private ChestUI chestInstance;
     
     [Header("=== SPECIAL EFFECTS ===")]
     public GameObject megaComboEffect;
@@ -73,11 +78,34 @@ public class UIManager : MonoBehaviour
 
     // References
     private ScoreSystem scoreSystem;
+    [Header("Wave HUD")]
+    public TextMeshProUGUI waveText;
+    public TextMeshProUGUI enemiesLeftText;
 
-    private void Start()
+    [Header("Pause Menu")]
+    public GameObject pauseMenuPanel;
+
+    void Start()
     {
         InitializeUI();
         FindAndSubscribeToScoreSystem();
+        
+        if (chestRewardPrefab != null)
+        {
+            GameObject chestObj = Instantiate(chestRewardPrefab, uiCanvas.transform);
+            chestObj.name = "ChestRewardUI";
+            chestInstance = chestObj.GetComponent<ChestUI>();
+            
+            if (chestInstance != null)
+            {
+                // The ChestUI GameObject stays active, only rootPanel is hidden
+                chestInstance.rootPanel.SetActive(false);
+            }
+            else
+            {
+                Debug.LogError("ChestRewardPrefab doesn't have a ChestUI component!");
+            }
+        }
     }
 
     private void InitializeUI()
@@ -138,6 +166,11 @@ public class UIManager : MonoBehaviour
         if (comboGlowEffect != null) comboGlowEffect.SetActive(false);
 
         Debug.Log("UIManager: Initialized successfully");
+    }
+
+    public void ShowChestReward()
+    {
+        chestInstance?.ShowChest();
     }
 
     /// <summary>
@@ -577,7 +610,49 @@ public class UIManager : MonoBehaviour
         if (biggestComboText != null) biggestComboText.ForceMeshUpdate();
     }
 
+        public void UpdateWaveHUD(int wave, int enemiesLeft)
+    {
+        if (waveText != null) waveText.text = $"Wave: {wave}";
+        if (enemiesLeftText != null) enemiesLeftText.text = $"Enemies Left: {enemiesLeft}";
+    }
+
     // ==================== GENERIC PANEL MANAGEMENT (Preserved) ====================
+
+    public void ShowPauseMenu()
+    {
+        if (pauseMenuPanel != null)
+        {
+            pauseMenuPanel.SetActive(true);
+        }
+    }
+
+    public void HidePauseMenu()
+    {
+        if (pauseMenuPanel != null)
+        {
+            pauseMenuPanel.SetActive(false);
+        }
+    }
+
+    public void OnResumeButtonPressed()
+    {
+        PauseManager.Instance?.Resume();
+        HidePauseMenu();
+    }
+
+    public void OnRestartButtonPressed()
+    {
+        PauseManager.Instance?.ForceResumeAll();
+        HidePauseMenu();
+        SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+    }
+
+    public void OnQuitToMenuButtonPressed()
+    {
+        PauseManager.Instance?.ForceResumeAll();
+        HidePauseMenu();
+        SceneManager.LoadScene("MainMenu"); // Replace with your main menu scene name
+    }
     
     public void ShowMainMenu() { Debug.Log("ShowMainMenu called"); HideAllPanels(); }
     public void ShowGameplayUI() { Debug.Log("ShowGameplayUI called"); HideAllPanels(); }
@@ -599,7 +674,6 @@ public class UIManager : MonoBehaviour
     }
 
     public void ShowStoreUI() { Debug.Log("ShowStoreUI called"); HideAllPanels(); }
-    public void ShowPauseMenu() { Debug.Log("ShowPauseMenu called"); HideAllPanels(); }
     public void ShowGameOver(GameOverData data) { Debug.Log($"Game Over - Victory: {data.victory}"); HideAllPanels(); }
     public void UpdateCoinDisplay(int coins) { Debug.Log($"Coins: {coins}"); }
     

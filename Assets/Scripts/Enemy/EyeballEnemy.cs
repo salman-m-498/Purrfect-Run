@@ -297,7 +297,7 @@ public class EyeballEnemy : MonoBehaviour, IEnemy
         
         SetBeamMode();
         line.enabled = true;
-        
+        AudioManager.Instance.PlaySFX(SoundID.Enemy_Attack_Eyeball);
         Debug.Log($"EyeballEnemy: Firing beam! Locked target at {lockedTargetPosition}");
     }
 

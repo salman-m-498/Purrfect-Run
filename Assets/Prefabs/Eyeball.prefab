@@ -120,7 +120,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   stats: {fileID: 11400000, guid: a29b9ae6c391d774a8405c8a01c2445c, type: 2}
-  health: 200
+  health: 150
   playerLayer:
     serializedVersion: 2
     m_Bits: 256
@@ -145,8 +145,8 @@ MonoBehaviour:
   groundLayer:
     serializedVersion: 2
     m_Bits: 64
-  hoverHeight: 6
-  terrainFollowSpeed: 8
+  hoverHeight: 5.32
+  terrainFollowSpeed: 10.66
   maxRaycastDist: 20
   leadDistance: 10
   sideOffset: 5

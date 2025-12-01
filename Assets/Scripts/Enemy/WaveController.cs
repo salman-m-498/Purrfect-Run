@@ -15,6 +15,8 @@ public class WaveController : MonoBehaviour
         public int count;
         public EnemyStats statsOverride; // Optional - uses pool default if null
         [Range(0f, 1f)] public float spawnWeight = 1f; // For random distribution
+
+        public int minWave = 1;
     }
 
     [System.Serializable]
@@ -64,28 +66,45 @@ public class WaveController : MonoBehaviour
     public int enemiesSpawned = 0;
     public int enemiesAlive = 0;
     public int enemiesKilled = 0;
+
+    public int GetCurrentWave() => currentWave;
+    public int GetEnemiesRemaining() => Mathf.Max(0, enemiesAlive);
     
     private Coroutine activeWaveCoroutine;
     private Rigidbody playerRb;
     
     void Start()
     {
-        // Auto-find player if not set
+        InitializeWaveController();
+    }
+
+    void OnEnable()
+    {
+        InitializeWaveController();
+    }
+
+    private void InitializeWaveController()
+    {
+        // Find player
         if (spawnCenter == null && GameManager.Instance?.playerController != null)
         {
             spawnCenter = GameManager.Instance.playerController.transform;
         }
 
-        // Cache player rigidbody for velocity prediction
+        // Cache rigidbody
         if (spawnCenter != null)
         {
             playerRb = spawnCenter.GetComponent<Rigidbody>();
-            if (playerRb == null)
-                playerRb = spawnCenter.GetComponentInParent<Rigidbody>();
         }
         
-        // Subscribe to enemy death events
+        // ALWAYS unsubscribe first to prevent duplicates
+        EnemyManager.OnEnemyDeath -= OnEnemyKilled;
         EnemyManager.OnEnemyDeath += OnEnemyKilled;
+    }
+
+    void OnDisable()
+    {
+        EnemyManager.OnEnemyDeath -= OnEnemyKilled;
     }
 
     void OnDestroy()
@@ -156,9 +175,14 @@ public class WaveController : MonoBehaviour
         int totalEnemies = Mathf.RoundToInt(baseEnemyCount * Mathf.Pow(enemyCountMultiplier, waveNumber - 1));
         
         // Distribute enemies based on weights
+        // Recalculate total weight for only unlocked enemies
         float totalWeight = 0f;
-        foreach (var enemyType in proceduralEnemyTypes)
-            totalWeight += enemyType.spawnWeight;
+        foreach (var enemy in proceduralEnemyTypes)
+        {
+            if (waveNumber >= enemy.minWave)
+                totalWeight += enemy.spawnWeight;
+        }
+
         
         if (totalWeight <= 0f)
         {
@@ -169,21 +193,25 @@ public class WaveController : MonoBehaviour
         // Create spawn info for each enemy type
         foreach (var template in proceduralEnemyTypes)
         {
+            // Skip enemies not yet unlocked
+            if (waveNumber < template.minWave)
+                continue;
+
             EnemySpawnInfo spawnInfo = new EnemySpawnInfo();
             spawnInfo.enemyPoolName = template.enemyPoolName;
             spawnInfo.statsOverride = template.statsOverride;
             spawnInfo.spawnWeight = template.spawnWeight;
-            
-            // Calculate count based on weight
+            spawnInfo.minWave = template.minWave;
+
             float ratio = template.spawnWeight / totalWeight;
             spawnInfo.count = Mathf.RoundToInt(totalEnemies * ratio);
-            
-            // Ensure at least 1 of each type if weight > 0
+
             if (spawnInfo.count == 0 && template.spawnWeight > 0)
                 spawnInfo.count = 1;
-            
+
             config.enemyTypes.Add(spawnInfo);
         }
+
         
         return config;
     }
@@ -390,21 +418,50 @@ public class WaveController : MonoBehaviour
     private void OnWaveComplete()
     {
         waveActive = false;
-        
         Debug.Log($"✅ Wave {currentWave} Complete! Killed {enemiesKilled} enemies");
-        
-        // Notify GameManager or UI
-        if (GameManager.Instance != null)
-        {
-            // Award bonus coins for wave completion
-            GameManager.Instance.AddCoins(currentWave * 10);
-        }
-    }
 
+        // 1. Pause
+        //PauseManager.Instance?.Pause();
+
+        // 2. Open chest UI
+        Debug.Log(">>> UIManager.Instance null? " + (UIManager.Instance == null));
+        UIManager.Instance?.ShowChestReward();
+    }
     private IEnumerator StartNextWaveAfterDelay(float delay)
     {
         yield return new WaitForSeconds(delay);
         StartWave(currentWave + 1);
+    }
+
+    public void ResetForNewRun()
+    {
+        StopWave();
+        currentWave = 0;
+        waveActive = false;
+        enemiesSpawned = 0;
+        enemiesAlive = 0;
+        enemiesKilled = 0;
+        
+        // Re-find player if needed
+        if (spawnCenter == null)
+        {
+            if (GameManager.Instance?.playerController != null)
+            {
+                spawnCenter = GameManager.Instance.playerController.transform;
+            }
+        }
+        
+        // Re-cache rigidbody
+        if (spawnCenter != null)
+        {
+            playerRb = spawnCenter.GetComponent<Rigidbody>();
+        }
+        
+        // CRITICAL: Resubscribe to enemy death events
+        EnemyManager.OnEnemyDeath -= OnEnemyKilled;
+        EnemyManager.OnEnemyDeath += OnEnemyKilled;
+        
+        Debug.Log("✅ WaveController reset complete");
     }
 
     // ============================================================

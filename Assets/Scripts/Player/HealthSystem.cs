@@ -108,6 +108,7 @@ public class HealthSystem : MonoBehaviour
 
         // Notify listeners (UI, etc.)
         OnHealthChanged?.Invoke(currentHealth, maxHealth);
+        AudioManager.Instance.PlaySFX(SoundID.Player_Damage);
 
         if (currentHealth <= 0f)
         {

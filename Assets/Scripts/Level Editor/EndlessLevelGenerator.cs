@@ -600,7 +600,7 @@ public class EndlessLevelGenerator : MonoBehaviour
         grindRail.transform.rotation = Quaternion.Euler(0,0,90);
         
         // Position at center of gap
-        grindRail.transform.position = gap.startPoint + direction * (length * 0.5f);
+        grindRail.transform.position = gap.startPoint + direction * (length * 0.5f) + new Vector3(0, 0.75f, 0); // Slightly above ground
         
         Debug.Log($"✅ Created grind rail: {length:F1}m long from {gap.startPoint} to {gap.endPoint}");
         CreateLava(gap, grindRail.transform);
@@ -637,19 +637,20 @@ public class EndlessLevelGenerator : MonoBehaviour
         int triIndex = 0;
         for (int i = 0; i < segments; i++)
         {
-            int current = i;
-            int next = (i + 1) % verticesPerCap;
-            int currentTop = verticesPerCap + current;
-            int nextTop = verticesPerCap + next;
-            
-            // Side triangles
+            int current     = i;
+            int next        = (i + 1) % verticesPerCap;
+            int currentTop  = verticesPerCap + current;
+            int nextTop     = verticesPerCap + next;
+
+            // first quad triangle
             triangles[triIndex++] = current;
-            triangles[triIndex++] = next;
+            triangles[triIndex++] = currentTop;   // <- swapped
+            triangles[triIndex++] = next;         // <- swapped
+
+            // second quad triangle
             triangles[triIndex++] = currentTop;
-            
-            triangles[triIndex++] = currentTop;
-            triangles[triIndex++] = next;
             triangles[triIndex++] = nextTop;
+            triangles[triIndex++] = next;         // <- swapped
         }
         
         mesh.vertices = vertices;
@@ -684,8 +685,11 @@ public class EndlessLevelGenerator : MonoBehaviour
         // 4. material
         lavaGO.GetComponent<MeshRenderer>().sharedMaterial = lavaMaterial;
 
-        // 5. no collider needed
-        Destroy(lavaGO.GetComponent<Collider>());
+        // 5. collider trigger needed
+        Destroy(lavaGO.GetComponent<MeshCollider>());
+        lavaGO.AddComponent<BoxCollider>();
+        lavaGO.GetComponent<BoxCollider>().isTrigger = true;
+        lavaGO.AddComponent<Lava>();
     }
 
 

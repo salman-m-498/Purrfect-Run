@@ -145,6 +145,7 @@ public class AutoAttackSystem : MonoBehaviour
             p.transform.position = ownerTransform.position;
             p.transform.rotation = Quaternion.LookRotation(dir);
             p.SetState(appliedDamage, projectileSpeed, projectileBounces, hitRadius, target.transform, bounceSearchRadius, this);
+            AudioManager.Instance.PlaySFX(SoundID.Player_Attack);
         }
     }
 

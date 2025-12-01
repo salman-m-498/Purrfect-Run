@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SocialPlatforms.Impl;
+using TMPro; // NEW: Need this for TextMeshPro
 
 public class PlayerController : MonoBehaviour
 {
@@ -12,6 +13,17 @@ public class PlayerController : MonoBehaviour
     public float pushSmoothTime = 0.5f;
     public float pushCooldown = 5f;
     public float jumpForce = 3f;
+
+    [Header("Dodge Settings")]
+    public float dodgeSpeed = 12f;            // lateral speed while dodging
+    public float dodgeDuration = 0.35f;       // how long the dodge lasts
+    public AnimationCurve dodgeReturnCurve =   // nice ease-out when sliding back to Z = 0
+        AnimationCurve.EaseInOut(0, 0, 1, 1);
+
+    private bool isDodging = false;
+    private float dodgeTimer = 0f;
+    private float dodgeStartZ = 0f;           // Z we started from (almost always 0)
+    private int dodgeDirection = 0;           // -1 left  +1 right
 
     [Header("Trick Settings")]
     public float swipeThreshold = 50f;
@@ -68,6 +80,10 @@ public class PlayerController : MonoBehaviour
     public float instantCorrectionThreshold = 0.1f; // Snap to upright if this close
     public bool usePhysicsCorrection = true; // Use torque-based correction
     public bool useDirectCorrection = true; // Use rotation-based correction
+
+    [Header("Push UI Settings")] // NEW SECTION FOR UI
+    public TextMeshProUGUI pushHintText; // Reference to the TMP Text component
+    public float pushHintDisplayDuration = 3f; // How long the hint stays visible
     
     private float lastManualResetTime = -999f;
     private bool hasShownFlipHint = false;
@@ -115,6 +131,7 @@ public class PlayerController : MonoBehaviour
     private int pushCount = 0;
     private float targetSpeed;
     private Coroutine currentPushRoutine;
+    private Coroutine currentPushHintRoutine; // NEW: Coroutine for managing the hint
     private Vector2 startTouchPos;
     private Vector2 endTouchPos;
     private Collider currentGrindCollider = null;
@@ -150,7 +167,6 @@ public class PlayerController : MonoBehaviour
         staminaSystem = manager.staminaSystem;
         healthSystem = manager.healthSystem;
         scoreSystem = manager.scoreSystem;
-        
         if (staminaSystem == null)
         {
             Debug.LogError("StaminaSystem not found in GameManager!");
@@ -192,6 +208,12 @@ public class PlayerController : MonoBehaviour
         }
 
         ResetState();
+        
+        // NEW: Ensure push hint is inactive at startup
+        if (pushHintText != null)
+        {
+            pushHintText.gameObject.SetActive(false);
+        }
     }
 
     public void ResetState()
@@ -224,6 +246,10 @@ public class PlayerController : MonoBehaviour
         {
             characterCollider.enabled = true;
         }
+        
+        // NEW: Hide hint on reset
+        if (currentPushHintRoutine != null) StopCoroutine(currentPushHintRoutine);
+        if (pushHintText != null) pushHintText.gameObject.SetActive(false);
     }
 
     void Start()
@@ -260,6 +286,14 @@ public class PlayerController : MonoBehaviour
             rb.angularVelocity = Vector3.zero;
         }
 
+        // NEW: Set initial push hint text and hide it
+        if (pushHintText != null)
+        {
+            // Set the reminder message
+            pushHintText.text = $"<color=yellow>Push!</color> (L-Click / Tap)";
+            pushHintText.gameObject.SetActive(false);
+        }
+
 #if UNITY_WEBGL && !UNITY_EDITOR
         // Ensure WebGL canvas captures input properly
         Debug.Log("WebGL build detected - Input system initialized");
@@ -288,6 +322,7 @@ public class PlayerController : MonoBehaviour
     void Update()
     {
         HandleInput();
+        HandlePauseInput();
         HandleManualInput();
         CheckGrindStatus();
         
@@ -304,6 +339,7 @@ public class PlayerController : MonoBehaviour
     private void FixedUpdate()
     {
         Grounded(); // Check ground FIRST in physics loop
+        HandleDodge();
         Move();
         
         // High-speed terrain adhesion - LIGHTER force to prevent jitter
@@ -682,6 +718,13 @@ public class PlayerController : MonoBehaviour
                         
                         // Gentle angular velocity damping
                         rb.angularVelocity *= 0.5f;
+
+                        // Check for AudioManager.Instance before calling PlaySFX (assuming it exists)
+                        // if (AudioManager.Instance != null)
+                        // {
+                        //     AudioManager.Instance.PlaySFX(SoundID.Player_Land);
+                        // }
+
                         
                         Debug.Log($"✅ Landing: Aligned to {moveDirection}, slope angle = {Vector3.Angle(groundNormal, Vector3.up):F1}°");
                     }
@@ -739,6 +782,63 @@ public class PlayerController : MonoBehaviour
     // ============================================================
     // MOVEMENT
     // ============================================================
+    /// <summary> Public wrapper so UI buttons can call it. </summary>
+    public void DodgeLeft()  { if (!isDodging) StartDodge(1); }
+    public void DodgeRight() { if (!isDodging) StartDodge( -1); }
+
+    private void StartDodge(int dir)
+    {
+        if (isDodging) return;
+        isDodging = true;
+        dodgeDirection = dir;
+        dodgeTimer = 0f;
+        dodgeStartZ = transform.position.z;
+
+        // tell the camera to ignore rotation for a split second so the board doesn’t wobble
+        if (cam != null) cam.SetIgnoreRotation(true);
+
+        // tutorial hook - notify tutorial system of dodge
+        Debug.Log("🎮 Dodge started - notifying tutorial");
+        if (TutorialSystem.Instance != null)
+        {
+            Debug.Log("✅ Calling OnPlayerDodge()");
+            TutorialSystem.Instance.OnPlayerDodge();
+        }
+        else
+        {
+            Debug.LogWarning("⚠️ TutorialSystem not found");
+        }
+    }
+
+    private void HandleDodge()
+    {
+        if (!isDodging) return;
+
+        dodgeTimer += Time.deltaTime;
+        float t = dodgeTimer / dodgeDuration;
+
+        if (t < 1f) // dodge outward phase
+        {
+            float lateral = dodgeDirection * dodgeSpeed * Time.deltaTime;
+            transform.position += new Vector3(0f, 0f, lateral);
+        }
+        else // slide back toward Z = targetZPosition (0)
+        {
+            float zTarget = targetZPosition;
+            float zNow = transform.position.z;
+            float zLerp = dodgeReturnCurve.Evaluate(Mathf.InverseLerp(0f, dodgeDuration, dodgeTimer - dodgeDuration));
+            float zNew = Mathf.Lerp(zNow, zTarget, zLerp * Time.deltaTime * 4f); // 4f = snappy return
+            transform.position = new Vector3(transform.position.x, transform.position.y, zNew);
+
+            // auto-stop when we’re close
+            if (Mathf.Abs(zNew - zTarget) < 0.05f)
+            {
+                transform.position = new Vector3(transform.position.x, transform.position.y, zTarget);
+                isDodging = false;
+                if (cam != null) cam.SetIgnoreRotation(false);
+            }
+        }
+    }
 
     private void Move()
     {
@@ -968,10 +1068,22 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
+        // NEW: Hide the hint text immediately on push
+        if (currentPushHintRoutine != null) StopCoroutine(currentPushHintRoutine);
+        if (pushHintText != null) pushHintText.gameObject.SetActive(false);
+
+        TutorialSystem.Instance?.OnPlayerPush();
+
+
         if (staminaSystem != null)
         {
             staminaSystem.OnPush();
         }
+
+        // if (TutorialSystem.Instance != null)
+        // {
+        //     TutorialSystem.Instance.OnPlayerPush();
+        // }
 
         pushCount++;
         targetSpeed = Mathf.Min(targetSpeed + pushForce, maxMoveSpeed);
@@ -992,24 +1104,63 @@ public class PlayerController : MonoBehaviour
         // Check for actual input type instead of platform
 #if UNITY_WEBGL && !UNITY_EDITOR
         // WebGL build - support both mouse and touch
+        // NOTE: WebGLInputFocusManager handles window.focus() calls
+        WebGLInput.captureAllKeyboardInput = false;
         if (Input.touchCount > 0)
         {
             HandleTouchInput();
         }
-        else if (Input.GetMouseButton(0) || Input.GetMouseButtonDown(0) || Input.GetMouseButtonUp(0))
+        else if (Input.GetMouseButton(0) || Input.GetMouseButtonDown(0) || Input.GetMouseButtonUp(0) || 
+                 Input.GetMouseButton(1) || Input.GetMouseButtonDown(1) || Input.GetMouseButtonUp(1))
         {
             HandleMouseInput();
         }
+        // IMPORTANT: Still handle keyboard input even when not clicking
+        HandleKeyboardInput();
 #elif UNITY_EDITOR || UNITY_STANDALONE
         HandleMouseInput();
+        HandleKeyboardInput();
 #else
         // Mobile platforms
         HandleTouchInput();
 #endif
     }
 
+    void HandleKeyboardInput()
+    {
+        // Handle keyboard-only inputs (dodge, manual reset)
+        if (Input.GetKeyDown(KeyCode.A)) 
+        {
+            DodgeLeft();
+        }
+        if (Input.GetKeyDown(KeyCode.D)) 
+        {
+            DodgeRight();
+        }
+    }
+
+    void HandlePauseInput()
+    {
+        // Handle pause menu toggle (ESC key)
+        if (Input.GetKeyDown(KeyCode.Escape))
+        {
+            if (gameManager != null)
+            {
+                if (gameManager.currentState == GameState.Playing)
+                {
+                    gameManager.PauseGame();
+                }
+                else if (gameManager.currentState == GameState.Paused)
+                {
+                    gameManager.ResumeGame();
+                }
+            }
+        }
+    }
+
     void HandleMouseInput()
     {
+        WebGLInput.captureAllKeyboardInput = false;
         if (Input.GetMouseButtonDown(0))
             startTouchPos = Input.mousePosition;
 
@@ -1018,12 +1169,14 @@ public class PlayerController : MonoBehaviour
             endTouchPos = Input.mousePosition;
             Vector2 swipeDelta = endTouchPos - startTouchPos;
 
+            // Always trigger Push on mouse up (unless a real swipe happens)
             if (swipeDelta.magnitude < swipeThreshold)
             {
-                if (isGrounded) Push();
+                Push(); // This will call TutorialSystem.Instance.OnPlayerPush()
                 return;
             }
 
+            // Otherwise, handle as swipe
             float x = swipeDelta.x;
             float y = swipeDelta.y;
 
@@ -1048,8 +1201,16 @@ public class PlayerController : MonoBehaviour
 
         if (Input.GetMouseButtonDown(1))
         {
-            if (Random.value > 0.5f) PopShoveIt();
-            else TreFlip();
+            if (Random.value > 0.5f)
+            {
+                PopShoveIt();
+                TutorialSystem.Instance?.OnPlayerRightClickTrick("PopShoveIt");
+            }
+            else
+            {
+                TreFlip();
+                TutorialSystem.Instance?.OnPlayerRightClickTrick("TreFlip");
+            }
         }
     }
 
@@ -1063,29 +1224,61 @@ public class PlayerController : MonoBehaviour
         {
             case TouchPhase.Began:
                 startTouchPos = touch.position;
+
+                // Double tap detection
+                if (touch.tapCount == 2)
+                {
+                    // Double tap: TreFlip or PopShoveIt
+                    if (Random.value > 0.5f)
+                    {
+                        PopShoveIt();
+                        TutorialSystem.Instance?.OnPlayerRightClickTrick("PopShoveIt");
+                    }
+                    else
+                    {
+                        TreFlip();
+                        TutorialSystem.Instance?.OnPlayerRightClickTrick("TreFlip");
+                    }
+                }
                 break;
 
             case TouchPhase.Ended:
                 endTouchPos = touch.position;
                 Vector2 swipeDelta = endTouchPos - startTouchPos;
 
+                // Only process if it's a significant swipe (not a tap)
                 if (swipeDelta.magnitude < swipeThreshold)
                 {
-                    Push();
+                    Push(); // Light tap = push
                     return;
                 }
 
                 float x = swipeDelta.x;
                 float y = swipeDelta.y;
 
+                // Prioritize vertical swipes
                 if (Mathf.Abs(y) > Mathf.Abs(x))
                 {
-                    if (y > 0) Ollie();
+                    if (!isGrounded && !isGrinding)
+                    {
+                        if (y > 0)
+                            Frontflip(); // Swipe up in air
+                        else
+                            Backflip(); // Swipe down in air
+                    }
+                    else
+                    {
+                        if (y > 0)
+                            Ollie(); // Swipe up on ground
+                    }
                 }
                 else
                 {
-                    if (x > 0) Kickflip();
-                    else Heelflip();
+                    // Horizontal swipes
+                    if (x > 0)
+                        Kickflip();
+                    else
+                        Heelflip();
                 }
                 break;
         }
@@ -1243,11 +1436,18 @@ public class PlayerController : MonoBehaviour
             Debug.Log("Not enough stamina to Ollie!");
             return;
         }
+
+        TutorialSystem.Instance?.OnPlayerJump();
         
         if (staminaSystem != null)
         {
             staminaSystem.OnJump();
         }
+
+         if (TutorialSystem.Instance != null)
+         {
+             TutorialSystem.Instance.OnPlayerJump();
+         }
 
         float finalJumpForce = jumpForce;
         if (isGrinding)
@@ -1255,7 +1455,7 @@ public class PlayerController : MonoBehaviour
             EndGrind();
             finalJumpForce *= grindJumpOffForce;
         }
-
+         if (AudioManager.Instance != null) AudioManager.Instance.PlaySFX(SoundID.Player_Ollie);
         rb.AddForce(Vector3.up * finalJumpForce, ForceMode.Impulse);
         Debug.Log("Ollie!");
     }
@@ -1267,12 +1467,16 @@ public class PlayerController : MonoBehaviour
             Debug.Log("Not enough stamina for Kickflip!");
             return;
         }
+        TutorialSystem.Instance?.OnPlayerTrick("Kickflip");
         
         if (isGrounded || isGrinding)
         {
             if (isGrinding) EndGrind();
             rb.AddForce(Vector3.up * jumpForce * 0.6f, ForceMode.Impulse);
         }
+
+         if (AudioManager.Instance != null) AudioManager.Instance.PlaySFX(SoundID.Player_Woosh);
+
 
         if (Time.time - lastTrickTime < 0.3f && lastTrickName == "Kickflip")
         {
@@ -1298,6 +1502,8 @@ public class PlayerController : MonoBehaviour
             rb.AddForce(Vector3.up * jumpForce * 0.6f, ForceMode.Impulse);
         }
 
+         if (AudioManager.Instance != null) AudioManager.Instance.PlaySFX(SoundID.Player_Woosh);
+
         if (Time.time - lastTrickTime < 0.3f && lastTrickName == "Heelflip")
         {
             StartFlip("Heelflip", Vector3.left, false, 2);
@@ -1315,6 +1521,9 @@ public class PlayerController : MonoBehaviour
             Debug.Log("Not enough stamina for Backflip!");
             return;
         }
+        TutorialSystem.Instance?.OnPlayerTrick("Backflip");
+
+         if (AudioManager.Instance != null) AudioManager.Instance.PlaySFX(SoundID.Player_Woosh);
         
         if (Time.time - lastTrickTime < 0.3f && lastTrickName == "Backflip")
         {
@@ -1333,6 +1542,13 @@ public class PlayerController : MonoBehaviour
             Debug.Log("Not enough stamina for Frontflip!");
             return;
         }
+
+        if (TutorialSystem.Instance != null)
+        {
+             TutorialSystem.Instance.OnPlayerTrick(lastTrickName);
+        }
+
+        if (AudioManager.Instance != null) AudioManager.Instance.PlaySFX(SoundID.Player_Woosh);
         
         if (Time.time - lastTrickTime < 0.3f && lastTrickName == "Frontflip")
         {
@@ -1359,6 +1575,7 @@ public class PlayerController : MonoBehaviour
         }
 
         Debug.Log("Pop Shove-It!");
+         if (AudioManager.Instance != null) AudioManager.Instance.PlaySFX(SoundID.Player_Woosh);
         
         if (staminaSystem != null)
         {
@@ -1390,6 +1607,7 @@ public class PlayerController : MonoBehaviour
         }
 
         Debug.Log("360 Flip (Tre Flip)!");
+         if (AudioManager.Instance != null) AudioManager.Instance.PlaySFX(SoundID.Player_Woosh);
         
         if (staminaSystem != null)
         {
@@ -1419,6 +1637,11 @@ public class PlayerController : MonoBehaviour
             if (isGrinding) EndGrind();
             rb.AddForce(Vector3.up * jumpForce * (0.8f + (flips * 0.2f)), ForceMode.Impulse);
         }
+
+         if (TutorialSystem.Instance != null)
+         {
+             TutorialSystem.Instance.OnPlayerTrick(trickName);
+         }
 
         string multipleTrickName = flips > 1 ? $"{flips}x {trickName}" : trickName;
         Debug.Log($"{multipleTrickName}!");
@@ -1454,6 +1677,12 @@ public class PlayerController : MonoBehaviour
             currentCombo = 1;
             comboMultiplier = 1f;
         }
+
+         if (TutorialSystem.Instance != null)
+         {
+             TutorialSystem.Instance.OnComboStarted(currentCombo, comboMultiplier);
+         }
+         if (AudioManager.Instance != null) AudioManager.Instance.PlaySFX(SoundID.Player_Combo);
 
         if (trickScores.TryGetValue(trickName, out int baseScore))
         {
@@ -1611,9 +1840,16 @@ public class PlayerController : MonoBehaviour
     IEnumerator PushCooldown(float duration)
     {
         canPush = false;
+        // NEW: Hide hint during cooldown
+        if (currentPushHintRoutine != null) StopCoroutine(currentPushHintRoutine);
+        if (pushHintText != null) pushHintText.gameObject.SetActive(false);
+
         yield return new WaitForSeconds(duration);
+
         pushCount = 0;
         canPush = true;
+        // NEW: Show hint when pushes are available again
+        currentPushHintRoutine = StartCoroutine(ShowPushHint());
     }
 
     IEnumerator SmoothPush()
@@ -1629,6 +1865,20 @@ public class PlayerController : MonoBehaviour
         }
 
         moveSpeed = targetSpeed;
+    }
+
+    /// <summary> Manages the temporary display of the push hint text. </summary>
+    IEnumerator ShowPushHint()
+    {
+        if (pushHintText == null) yield break;
+
+        // Only show if the player is currently able to push
+        if (canPush && pushCount < maxPushes)
+        {
+            pushHintText.gameObject.SetActive(true);
+            yield return new WaitForSeconds(pushHintDisplayDuration);
+            pushHintText.gameObject.SetActive(false);
+        }
     }
 
     // ============================================================

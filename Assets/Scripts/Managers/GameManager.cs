@@ -82,6 +82,9 @@ public class GameManager : MonoBehaviour
         {
             Instance = this;
             DontDestroyOnLoad(gameObject);
+            
+            // Subscribe to scene loaded event
+            SceneManager.sceneLoaded += OnSceneLoaded;
         }
         else
         {
@@ -92,6 +95,77 @@ public class GameManager : MonoBehaviour
         InitializeSystems();
     }
 
+    void OnDestroy()
+    {
+        // Unsubscribe from scene loaded event
+        if (Instance == this)
+        {
+            SceneManager.sceneLoaded -= OnSceneLoaded;
+        }
+    }
+
+    /// <summary>
+    /// Called whenever a scene is loaded - re-find references to scene objects
+    /// </summary>
+    private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        Debug.Log($"GameManager: Scene '{scene.name}' loaded - re-finding references...");
+        
+        // Re-find all scene-specific references
+        RefreshSceneReferences();
+    }
+
+    /// <summary>
+    /// Find or refresh references to objects in the current scene
+    /// </summary>
+    private void RefreshSceneReferences()
+    {
+        // Always re-find these as they're destroyed on scene reload
+        playerController = FindObjectOfType<PlayerController>();
+        levelManager = FindObjectOfType<LevelManager>();
+        scoreSystem = FindObjectOfType<ScoreSystem>();
+        staminaSystem = FindObjectOfType<StaminaSystem>();
+        healthSystem = FindObjectOfType<HealthSystem>();
+        storeManager = FindObjectOfType<StoreManager>();
+        skillCheckSystem = FindObjectOfType<SkillCheckSystem>();
+        itemSystem = FindObjectOfType<ItemSystem>();
+        cam = FindObjectOfType<DollyCam>();
+        waveController = FindObjectOfType<WaveController>();
+        
+        // UIManager might be singleton, but check anyway
+        if (uiManager == null || !uiManager.gameObject.scene.IsValid())
+        {
+            uiManager = UIManager.Instance;
+            if (uiManager == null)
+            {
+                uiManager = FindObjectOfType<UIManager>();
+            }
+        }
+
+        // Re-initialize player controller if found
+        if (playerController != null)
+        {
+            playerController.Initialize(this);
+            Debug.Log("✅ PlayerController re-initialized");
+        }
+        
+        // Log what we found
+        LogReferenceStatus();
+    }
+
+    private void LogReferenceStatus()
+    {
+        Debug.Log("=== GameManager Reference Status ===");
+        Debug.Log($"PlayerController: {(playerController != null ? "✅" : "❌")}");
+        Debug.Log($"LevelManager: {(levelManager != null ? "✅" : "❌")}");
+        Debug.Log($"ScoreSystem: {(scoreSystem != null ? "✅" : "❌")}");
+        Debug.Log($"StaminaSystem: {(staminaSystem != null ? "✅" : "❌")}");
+        Debug.Log($"HealthSystem: {(healthSystem != null ? "✅" : "❌")}");
+        Debug.Log($"UIManager: {(uiManager != null ? "✅" : "❌")}");
+        Debug.Log($"WaveController: {(waveController != null ? "✅" : "❌")}");
+        Debug.Log($"Camera: {(cam != null ? "✅" : "❌")}");
+    }
+
     void InitializeSystems()
     {
         // Initialize PlayerData
@@ -99,30 +173,7 @@ public class GameManager : MonoBehaviour
             playerData = new PlayerData();
         
         // Find system references if not assigned
-        if (playerController == null)
-            playerController = FindObjectOfType<PlayerController>();
-        if (levelManager == null)
-            levelManager = FindObjectOfType<LevelManager>();
-        if (scoreSystem == null)
-            scoreSystem = FindObjectOfType<ScoreSystem>();
-        if (staminaSystem == null)
-            staminaSystem = FindObjectOfType<StaminaSystem>();
-            if (healthSystem == null)
-            healthSystem = FindObjectOfType<HealthSystem>();
-        if (storeManager == null)
-            storeManager = FindObjectOfType<StoreManager>();
-        if (uiManager == null)
-            uiManager = FindObjectOfType<UIManager>();
-        if (skillCheckSystem == null)
-            skillCheckSystem = FindObjectOfType<SkillCheckSystem>();
-        if (itemSystem == null)
-            itemSystem = FindObjectOfType<ItemSystem>();
-        if (cam == null)
-            cam = FindObjectOfType<DollyCam>();
-
-        // Initialize subsystems
-        if (playerController != null)
-            playerController.Initialize(this);
+        RefreshSceneReferences();
         
         // Load persistent data
         playerData.LoadFromPlayerPrefs();
@@ -236,13 +287,11 @@ public class GameManager : MonoBehaviour
 
     // ==================== SCORE SYSTEM INTEGRATION ====================
 
-    // Add this helper method to GameManager to get current score
     public int GetCurrentScore()
     {
         return scoreSystem != null ? scoreSystem.GetCurrentScore() : 0;
     }
 
-    // Update the CheckLevelCompletion method to use proper score tracking
     private void CheckLevelCompletion()
     {
         bool passed = false;
@@ -255,7 +304,7 @@ public class GameManager : MonoBehaviour
         }
         else
         {
-            // Normal level - check score requirement - FIXED: Use GetCurrentScore()
+            // Normal level - check score requirement
             int currentScore = GetCurrentScore();
             int required = CalculateScoreRequirement();
             passed = currentScore >= required;
@@ -288,10 +337,10 @@ public class GameManager : MonoBehaviour
         // Reset player run data (not persistent data)
         playerData.ResetRunData();
 
-        // Reset systems - FIXED: Reset run score instead of level score
+        // Reset systems
         if (scoreSystem != null)
         {
-            scoreSystem.ResetRunScore();  // NEW: Reset entire run score
+            scoreSystem.ResetRunScore();
         }
         if (staminaSystem != null)
             staminaSystem.ResetStamina();
@@ -304,9 +353,6 @@ public class GameManager : MonoBehaviour
         ChangeGameState(GameState.Playing);
     }
 
-    /// <summary>
-    /// Starts endless mode - infinite levels with auto-scaling difficulty
-    /// </summary>
     public void StartEndlessMode()
     {
         // Reset run data
@@ -345,15 +391,13 @@ public class GameManager : MonoBehaviour
         }
     }
 
-
     // ==================== LEVEL FLOW ====================
 
     private void StartLevel()
     {
         Time.timeScale = 1f;
-        if (waveController != null) waveController.OnLevelStart(currentRound, currentLevelInRound);
 
-        // Determine level type (use LevelManager's nested enum to match LevelManager.SetupLevel signature)
+        // Determine level type
         LevelManager.LevelType levelType = (currentLevelInRound == 3) ? LevelManager.LevelType.SkillCheck : LevelManager.LevelType.Normal;
 
         // Calculate requirements for this level
@@ -371,10 +415,10 @@ public class GameManager : MonoBehaviour
         if (playerController != null)
             playerController.ResetForNewLevel();
 
-        // Reset score for THIS LEVEL (not entire run) - FIXED
+        // Reset score for THIS LEVEL (not entire run)
         if (scoreSystem != null)
         {
-            scoreSystem.ResetScore();  // This now properly tracks level vs run score
+            scoreSystem.ResetScore();
         }
 
         // Update UI
@@ -387,7 +431,6 @@ public class GameManager : MonoBehaviour
         Debug.Log($"GameManager: Started Level - Round {currentRound}, Level {currentLevelInRound}/{3} ({levelType})");
     }
 
-
     private void StartSkillCheck()
     {
         if (skillCheckSystem != null)
@@ -395,19 +438,16 @@ public class GameManager : MonoBehaviour
             skillCheckSystem.StartRandomChallenge();
         }
         
-        // Skill checks still use normal level flow but with special win conditions
         ChangeGameState(GameState.Playing);
     }
 
     public void OnLevelTimerExpired()
     {
-        // Level time ran out - check if player passed
         CheckLevelCompletion();
     }
 
     public void OnPlayerReachedFinish()
     {
-        // Player reached finish line early
         CheckLevelCompletion();
     }
 
@@ -420,13 +460,11 @@ public class GameManager : MonoBehaviour
     {
         totalLevelsCompleted++;
         
-        // IMPORTANT: Finalize the level score BEFORE getting it
         if (scoreSystem != null)
         {
-            scoreSystem.FinalizeLevelScore(); // Add current level score to run total
+            scoreSystem.FinalizeLevelScore();
         }
         
-        // NOW get the current level score (which was just finalized)
         int currentScore = GetCurrentScore();
         
         // Award coins based on performance
@@ -437,7 +475,7 @@ public class GameManager : MonoBehaviour
         if (currentRound > highestRoundReached)
             highestRoundReached = currentRound;
 
-        // Save high scores - Use total run score for high score tracking
+        // Save high scores
         int totalScore = scoreSystem != null ? scoreSystem.GetTotalRunScore() : 0;
         if (totalScore > playerData.highScore)
         {
@@ -453,7 +491,7 @@ public class GameManager : MonoBehaviour
             LevelResultData results = new LevelResultData
             {
                 passed = true,
-                score = currentScore,  // Show level score
+                score = currentScore,
                 coinsEarned = coinsEarned,
                 levelTime = levelManager != null ? levelManager.GetLevelTime() : 0f
             };
@@ -463,15 +501,12 @@ public class GameManager : MonoBehaviour
         Debug.Log($"GameManager: Level Complete! Score: {currentScore}, Total Run Score: {totalScore}, Coins earned: {coinsEarned}");
     }
 
-
     private void HandleLevelFailed()
     {
         OnLevelEnded?.Invoke(false);
 
-        // Get current level score - FIXED
         int currentScore = GetCurrentScore();
 
-        // Show results
         if (uiManager != null)
         {
             LevelResultData results = new LevelResultData
@@ -492,32 +527,25 @@ public class GameManager : MonoBehaviour
 
     public void OnContinueAfterLevelComplete()
     {
-        // Move to next level
         currentLevelInRound++;
 
-        // Check if round is complete (3 levels done)
         if (currentLevelInRound > 3)
         {
-            // Round complete - go to store
             currentRound++;
             currentLevelInRound = 1;
             OnRoundChanged?.Invoke(currentRound, currentLevelInRound);
 
-            // Check if game is won
             if (currentRound > maxRoundsPerRun)
             {
-                // Player beat the game!
                 ChangeGameState(GameState.GameOver);
             }
             else
             {
-                // Go to store between rounds
                 ChangeGameState(GameState.Store);
             }
         }
         else
         {
-            // Continue to next level in same round
             OnRoundChanged?.Invoke(currentRound, currentLevelInRound);
             ChangeGameState(GameState.Playing);
         }
@@ -525,18 +553,14 @@ public class GameManager : MonoBehaviour
 
     public void OnRetryAfterLevelFailed()
     {
-        // Retry current level
         ChangeGameState(GameState.Playing);
     }
 
     public void OnQuitToMenuAfterLevelFailed()
     {
-        // End run and return to menu
         EndRun(false);
         ChangeGameState(GameState.MainMenu);
     }
-
-    
 
     // ==================== STORE FLOW ====================
 
@@ -555,26 +579,8 @@ public class GameManager : MonoBehaviour
         Debug.Log("GameManager: Store opened");
     }
 
-    public void OnItemPurchased(string itemId, int cost)
-    {
-        // Deduct coins
-        AddCoins(-cost);
-
-        // Apply item
-        if (itemSystem != null)
-        {
-            itemSystem.ApplyItem(itemId);
-        }
-
-        // Add to owned items for this run
-        playerData.AddItemToRun(itemId);
-
-        Debug.Log($"GameManager: Purchased {itemId} for {cost} coins");
-    }
-
     public void OnStoreExit()
     {
-        // Return to next level
         ChangeGameState(GameState.Playing);
     }
 
@@ -648,7 +654,6 @@ public class GameManager : MonoBehaviour
 
     private void EndRun(bool victory)
     {
-        // Update persistent stats
         playerData.totalRuns++;
         if (victory)
             playerData.totalVictories++;
@@ -664,7 +669,7 @@ public class GameManager : MonoBehaviour
     public void AddCoins(int amount)
     {
         playerData.coins += amount;
-        totalCoinsEarnedThisRun += Mathf.Max(0, amount); // Only count positive additions
+        totalCoinsEarnedThisRun += Mathf.Max(0, amount);
         OnCoinsChanged?.Invoke(playerData.coins);
 
         if (uiManager != null)
@@ -675,10 +680,8 @@ public class GameManager : MonoBehaviour
     {
         int score = scoreSystem != null ? scoreSystem.GetCurrentScore() : 0;
         
-        // Base coins from score
         int baseCoins = score / 100;
         
-        // Bonus from performance metrics
         int bonusCoins = 0;
         if (scoreSystem != null)
         {
@@ -693,7 +696,6 @@ public class GameManager : MonoBehaviour
 
     private int CalculateScoreRequirement()
     {
-        // Score requirement increases each level
         int totalLevels = (currentRound - 1) * 3 + currentLevelInRound;
         return Mathf.RoundToInt(baseScoreRequirement * Mathf.Pow(scoreMultiplierPerLevel, totalLevels - 1));
     }
